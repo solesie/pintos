@@ -10,7 +10,7 @@ static void syscall_handler (struct intr_frame *);
 
 void exit (int status){
   printf("%s: exit(%d)\n", thread_name(), status);
-  
+  thread_current() -> exit_status = status;
   thread_exit ();
 }
 
@@ -71,7 +71,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_WAIT:
-      wait((pid_t)*(uint32_t*)(f->esp + 4));
+      f->eax = wait((pid_t)*(uint32_t*)(f->esp + 4));
       break;
     case SYS_WRITE:
       //echo x를 하면 echo, x, \n 이렇게 3번의 SYS_WRITE interrupt가 오는듯 하다.
@@ -82,7 +82,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       if(is_kernel_vaddr(f->esp + 20) || is_kernel_vaddr(f->esp + 24) || is_kernel_vaddr(f->esp + 28)){
         exit(-1);
       }
-      read((int)*(uint32_t*)(f->esp + 20), (void*)*(uint32_t*)(f->esp + 24), (unsigned)*((uint32_t*)(f->esp + 28)));
+      f->eax = read((int)*(uint32_t*)(f->esp + 20), (void*)*(uint32_t*)(f->esp + 24), (unsigned)*((uint32_t*)(f->esp + 28)));
       break;
     case SYS_FIBO:
       printf("fibonacci\n");

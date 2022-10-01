@@ -44,6 +44,13 @@ process_execute (const char *file_name)
   strlcpy(command, file_name, strlen(file_name) + 1);
   for (i=0; command[i]!='\0' && command[i] != ' '; i++);
   command[i] = '\0';
+  struct file* command_file = NULL;
+  command_file = filesys_open(command);
+  if(command_file == NULL){
+    file_close(command_file);
+    return -1;
+  }
+
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
@@ -101,8 +108,17 @@ process_wait (tid_t child_tid)
   while(element != list_end(&(thread_current()->child))){
     //list_entry()를 통해 list_elem 바깥쪽 데이터에 접근 가능한 pintos의 list 자료구조
     t = list_entry(element, struct thread, child_elem);
-    
+    if(child_tid == t->tid){
+      //child_sema 가 실행중이라면 process_exit()에서 sema_up(&(t->child_sema))까지 sleep()된다.
+      sema_down(&(t->child_semaphore));
+      exit_status = t->exit_status;
+      list_remove(&(t->child_elem));
+      sema_up(&(t->memory_semaphore));
+      return exit_status;
+    }
+    element = list_next(element);
   }
+  return -1;
 }
 
 /* Free the current process's resources. */
@@ -128,6 +144,9 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
+  //현재 스레드가 종료된다면, 현재 스레드를 루트로 하는 서브트리가 종료되었다고 판단한다.
+  sema_up(&(cur->child_semaphore));
+  sema_down(&(cur->memory_semaphore));
 }
 
 /* Sets up the CPU for running user code in the current
