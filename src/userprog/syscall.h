@@ -5,7 +5,7 @@
 void syscall_init (void);
 
 /* 
- * terminate Pintos by calling shutdown_power_off()(declared in devices/shutdown.h
+ * terminate Pintos by calling shutdown_power_off()(declared in devices/shutdown.h)
  * deadlock 조심.
  */
 void halt(void);
