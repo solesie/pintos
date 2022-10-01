@@ -346,7 +346,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
    */
   construct_stack(file_name,esp); 
 
-
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
