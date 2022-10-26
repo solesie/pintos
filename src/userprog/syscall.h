@@ -57,6 +57,8 @@ void seek (int fd, unsigned position);
    expressed in bytes from the beginning of the file. */
 unsigned tell (int fd);
 
+int filesize(int fd);
+
 int sys_filesize(int fd);
 
 int fibonacci(int n);

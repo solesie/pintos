@@ -36,14 +36,11 @@ struct inode
     int deny_write_cnt;                 /* 0: writes ok, >0: deny writes. */
     struct inode_disk data;             /* Inode content. */
   
-#ifdef USERPROG
-    //int read_cnt;                       /* 읽는 프로세스의 숫자. File Sharing 의 경우를 고려하여 inode에 정의한다. */
-    //struct lock w;
-    //struct semaphore mutex_inode;
-#endif
-    int read_cnt;  
+#ifdef USERPROG                      
+    int read_cnt;
     struct lock w;
     struct lock inode_readcnt_mutex;
+#endif
   };
 
 void inode_init (void);

@@ -108,10 +108,7 @@ int write (int fd, const void* buffer, unsigned size){
 }
 
 bool create(const char* file, unsigned initial_size){
-  /* filesys_create 가 호출되는 동안 inode_close, inode_read_at, inode_write_at 등 메모리를 조작하는 많은 함수가 호출된다.
-     1. filesys_create 되는 동안은 다른 프로세스가 해당 inode_sector 는 건들지 못하게 하던가 (dir, free-map 전부 고려해야함),
-     2. 아예 어떠한 함수도 호출 못하게 하던가.
-     해야한다. 1번의 방법을 선택한다. */
+  /* filesys_create 가 호출되는 동안 inode_close, inode_read_at, inode_write_at 등 메모리를 조작하는 많은 함수가 호출된다. */
   if (file == NULL) {
       exit(-1);
   }
