@@ -315,7 +315,8 @@ bitmap_scan (const struct bitmap *b, size_t start, size_t cnt, bool value)
    If there is no such group, returns BITMAP_ERROR.
    If CNT is zero, returns 0.
    Bits are set atomically, but testing bits is not atomic with
-   setting them. */
+   setting them.
+   bitmap에서 할당할 연속된 블록을 찾고, 할당한 블록의 bitmap을 true로 설정 */
 size_t
 bitmap_scan_and_flip (struct bitmap *b, size_t start, size_t cnt, bool value)
 {

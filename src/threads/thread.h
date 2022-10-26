@@ -25,7 +25,7 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
-/* A kernel thread or user process.
+/* A kernel thread or user process. PCB
 
    Each thread structure is stored in its own 4 kB page.  The
    thread structure itself sits at the very bottom of the page
@@ -94,15 +94,21 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
-#ifdef USERPROG
+//#ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
     struct list child;
     struct list_elem child_elem;
-    struct semaphore child_semaphore;
-    struct semaphore memory_semaphore;
     int exit_status;
-#endif
+    /* wait 하고 나서 exit 되어야 한다.
+       다른 프로세스하고 점유를 가지기 위해 싸우는 것이 아니므로 lock이 아닌 semaphore 사용. */
+    struct semaphore wait_sema;
+    struct semaphore exit_sema;
+
+    bool load_success;
+    
+    struct file* fd[128];
+//#endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

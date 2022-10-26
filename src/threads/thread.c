@@ -469,9 +469,11 @@ init_thread (struct thread *t, const char *name, int priority)
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
   #ifdef USERPROG
+  //fd 초기화
+  memset(t->fd, NULL, sizeof(t->fd));
   //child semaphore 초기화
-  sema_init(&(t->child_semaphore), 0);
-  sema_init(&(t->memory_semaphore), 0);
+  sema_init(&(t->exit_sema), 0);
+  sema_init(&(t->wait_sema), 0);
   list_init(&(t->child));
   list_push_back(&(running_thread()->child), &(t->child_elem));
   #endif

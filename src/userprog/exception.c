@@ -149,7 +149,7 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  if(user == false || is_kernel_vaddr(fault_addr)){ //현재 메모리가 커널 영역인 경우
+  if(user == false || is_kernel_vaddr(fault_addr) || not_present){ //현재 메모리가 커널 영역인 경우
    exit(-1);
   }
 

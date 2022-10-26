@@ -26,7 +26,7 @@ struct dir_entry
 bool
 dir_create (block_sector_t sector, size_t entry_cnt)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry));
+  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), NULL);
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -71,8 +71,11 @@ dir_close (struct dir *dir)
 {
   if (dir != NULL)
     {
-      inode_close (dir->inode);
-      free (dir);
+      bool ret = inode_close (dir->inode);
+#ifdef USERPROG
+      if(ret == true) //inode가 free 되었다면
+#endif
+        free (dir); 
     }
 }
 
@@ -87,11 +90,22 @@ dir_get_inode (struct dir *dir)
    If successful, returns true, sets *EP to the directory entry
    if EP is non-null, and sets *OFSP to the byte offset of the
    directory entry if OFSP is non-null.
+   dir->inode를 reading 하는 상황이다.
    otherwise, returns false and ignores EP and OFSP. */
 static bool
 lookup (const struct dir *dir, const char *name,
-        struct dir_entry *ep, off_t *ofsp) 
+        struct dir_entry *ep, off_t *ofsp, bool in_writer) 
 {
+#ifdef USERPROG
+  if(!in_writer){
+    lock_acquire(&(dir->inode->inode_readcnt_mutex));
+    ++dir->inode->read_cnt;
+    if(dir->inode->read_cnt == 1)
+      lock_acquire(&(dir->inode->w));
+    lock_release(&(dir->inode->inode_readcnt_mutex));
+  }
+#endif
+
   struct dir_entry e;
   size_t ofs;
   
@@ -110,6 +124,17 @@ lookup (const struct dir *dir, const char *name,
         return true;
       }
   }
+
+#ifdef USERPROG
+  if(!in_writer){
+    lock_acquire(&(dir->inode->inode_readcnt_mutex));
+    --dir->inode->read_cnt;
+    if(dir->inode->read_cnt == 0)
+      lock_release(&(dir->inode->w));
+    lock_release(&(dir->inode->inode_readcnt_mutex));
+  }
+#endif
+
   return false;
 }
 
@@ -126,7 +151,7 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  if (lookup (dir, name, &e, NULL))
+  if (lookup (dir, name, &e, NULL, false))
     *inode = inode_open (e.inode_sector);
   else
     *inode = NULL;
@@ -139,7 +164,8 @@ dir_lookup (const struct dir *dir, const char *name,
    INODE_SECTOR.
    Returns true if successful, false on failure.
    Fails if NAME is invalid (i.e. too long) or a disk or memory
-   error occurs. */
+   error occurs.
+   dir->inode 에 writing하는 상황이다. */
 bool
 dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 {
@@ -151,11 +177,16 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   ASSERT (name != NULL);
 
   /* Check NAME for validity. */
-  if (*name == '\0' || strlen (name) > NAME_MAX)
+  if (*name == '\0' || strlen (name) > NAME_MAX){
     return false;
+  }
+
+#ifdef USERPROG
+  lock_acquire(&(dir->inode->w));
+#endif
 
   /* Check that NAME is not in use. */
-  if (lookup (dir, name, NULL, NULL))
+  if (lookup (dir, name, NULL, NULL, true))
     goto done;
 
   /* Set OFS to offset of free slot.
@@ -177,12 +208,17 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   success = inode_write_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
 
  done:
+
+#ifdef USERPROG
+  lock_release(&(dir->inode->w));
+#endif
   return success;
 }
 
 /* Removes any entry for NAME in DIR.
    Returns true if successful, false on failure,
-   which occurs only if there is no file with the given NAME. */
+   which occurs only if there is no file with the given NAME.
+   dir->inode 에 writing하는 상황이다. */
 bool
 dir_remove (struct dir *dir, const char *name) 
 {
@@ -194,8 +230,12 @@ dir_remove (struct dir *dir, const char *name)
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
+#ifdef USERPROG
+  lock_acquire(&(dir->inode->w));
+#endif
+
   /* Find directory entry. */
-  if (!lookup (dir, name, &e, &ofs))
+  if (!lookup (dir, name, &e, &ofs, true))
     goto done;
 
   /* Open inode. */
@@ -213,6 +253,9 @@ dir_remove (struct dir *dir, const char *name)
   success = true;
 
  done:
+#ifdef USERPROG
+  lock_release(&(dir->inode->w));
+#endif
   inode_close (inode);
   return success;
 }

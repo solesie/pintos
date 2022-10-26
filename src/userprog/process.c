@@ -18,6 +18,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "filesys/inode.h"
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
@@ -44,17 +46,22 @@ process_execute (const char *file_name)
   strlcpy(command, file_name, strlen(file_name) + 1);
   for (i=0; command[i]!='\0' && command[i] != ' '; i++);
   command[i] = '\0';
-  struct file* command_file = NULL;
-  command_file = filesys_open(command);
-  if(command_file == NULL){
-    file_close(command_file);
-    return -1;
-  }
 
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (command, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  else{
+    struct thread *cur = thread_current ();
+    struct list_elem *e = list_pop_back (&cur->child); // start_process 를 실행하는 자식 프로세스
+    struct thread* child = list_entry (e, struct thread, child_elem);
+
+    sema_down (&child->wait_sema); // 자식 프로세스의 load가 수행된 뒤에 수행될 수 있도록.
+    if (!child->load_success)
+      tid = TID_ERROR;
+    else
+      list_push_back (&cur->child, e);
+  }
   return tid;
 }
 
@@ -74,11 +81,14 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  struct thread* cur = thread_current ();
+  cur->load_success = success;
+  sema_up (&cur->wait_sema); // 현재 프로세스를 wait 할 수 있게 한다.
+
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
-
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -108,12 +118,23 @@ process_wait (tid_t child_tid)
   while(element != list_end(&(thread_current()->child))){
     //list_entry()를 통해 list_elem 바깥쪽 데이터에 접근 가능한 pintos의 list 자료구조
     t = list_entry(element, struct thread, child_elem);
+    list_remove(&(t->child_elem));
     if(child_tid == t->tid){
-      //child_sema 가 실행중이라면 process_exit()에서 sema_up(&(t->child_sema))까지 sleep()된다.
-      sema_down(&(t->child_semaphore));
-      exit_status = t->exit_status;
-      list_remove(&(t->child_elem));
-      sema_up(&(t->memory_semaphore));
+      if(t->status == THREAD_DYING){ //exit() 이 호출된 이후라면(부모가 종료되고...)
+        if(t->exit_status == 0){ //정상적으로 종료된 경우
+          exit_status = 0;
+          sema_up(&t->exit_sema); //exit에서 sema_down으로 기다리고 있는 t가 exit 될 수 있도록 한다.
+        }
+        else{
+          sema_up(&t->exit_sema);
+          return -1;
+        }
+      }
+      else{ //아직 exit() 이 호출되기 전이라면
+        sema_down (&t->wait_sema); //exit에서 sema_up을 해줄 때 까지 기다린다.
+        exit_status = t->exit_status;
+        sema_up (&t->exit_sema);
+      }
       return exit_status;
     }
     element = list_next(element);
@@ -144,9 +165,18 @@ process_exit (void)
       pagedir_activate (NULL);
       pagedir_destroy (pd);
     }
-  //현재 스레드가 종료된다면, 현재 스레드를 루트로 하는 서브트리가 종료되었다고 판단한다.
-  sema_up(&(cur->child_semaphore));
-  sema_down(&(cur->memory_semaphore));
+
+  /* 이 프로세스가 종료될 때, 자식 프로세스는 모두 종료가 가능하게 된다. */
+  struct list_elem *e;
+  for (e = list_begin (&cur->child); 
+       e != list_end (&cur->child); e = list_next(e)) 
+    {
+      struct thread *c = list_entry (e, struct thread, child_elem);
+      sema_up (&c->exit_sema);
+    }
+
+  sema_up(&(cur->wait_sema)); // cur이 wait하고 있다면 실행될 수 있도록 한다.
+  sema_down(&(cur->exit_sema)); // cur이 exit()를 통해 exit_sema를 올리거나, 부모가 종료되기 전까지 이 함수는 종료되지 않는다.(zombie)
 }
 
 /* Sets up the CPU for running user code in the current

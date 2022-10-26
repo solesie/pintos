@@ -2,14 +2,7 @@
 #include <debug.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
-
-/* An open file. */
-struct file 
-  {
-    struct inode *inode;        /* File's inode. */
-    off_t pos;                  /* Current position. */
-    bool deny_write;            /* Has file_deny_write() been called? */
-  };
+#include "threads/synch.h"
 
 /* Opens a file for the given INODE, of which it takes ownership,
    and returns the new file.  Returns a null pointer if an
@@ -38,7 +31,10 @@ file_open (struct inode *inode)
 struct file *
 file_reopen (struct file *file) 
 {
-  return file_open (inode_reopen (file->inode));
+  if(file == NULL)
+    return NULL;
+  struct file* f = file_open (inode_reopen (file->inode));
+  return f;
 }
 
 /* Closes FILE. */
@@ -49,7 +45,7 @@ file_close (struct file *file)
     {
       file_allow_write (file);
       inode_close (file->inode);
-      free (file); 
+      free (file);
     }
 }
 
@@ -68,8 +64,27 @@ file_get_inode (struct file *file)
 off_t
 file_read (struct file *file, void *buffer, off_t size) 
 {
+#ifdef USERPROG
+  lock_acquire(&file->inode->inode_readcnt_mutex);
+  ++file->inode->read_cnt;
+  if(file->inode->read_cnt == 1){
+    lock_acquire(&file->inode->w);
+  }
+  lock_release(&file->inode->inode_readcnt_mutex);
+#endif
+
   off_t bytes_read = inode_read_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_read;
+
+#ifdef USERPROG
+  lock_acquire(&file->inode->inode_readcnt_mutex);
+  --file->inode->read_cnt;
+  if(file->inode->read_cnt == 0){
+    lock_release(&file->inode->w);
+  }
+  lock_release(&file->inode->inode_readcnt_mutex);
+#endif
+
   return bytes_read;
 }
 
@@ -81,7 +96,24 @@ file_read (struct file *file, void *buffer, off_t size)
 off_t
 file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs) 
 {
-  return inode_read_at (file->inode, buffer, size, file_ofs);
+#ifdef USERPROG
+  lock_acquire(&file->inode->inode_readcnt_mutex);
+  ++file->inode->read_cnt;
+  if(file->inode->read_cnt == 1){
+    lock_acquire(&file->inode->w);
+  }
+  lock_release(&file->inode->inode_readcnt_mutex);
+#endif
+  off_t ret = inode_read_at (file->inode, buffer, size, file_ofs);
+#ifdef USERPROG
+  lock_acquire(&file->inode->inode_readcnt_mutex);
+  --file->inode->read_cnt;
+  if(file->inode->read_cnt == 0){
+    lock_release(&file->inode->w);
+  }
+  lock_release(&file->inode->inode_readcnt_mutex);
+#endif
+  return ret;
 }
 
 /* Writes SIZE bytes from BUFFER into FILE,
@@ -94,8 +126,14 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
 off_t
 file_write (struct file *file, const void *buffer, off_t size) 
 {
+#ifdef USERPROG
+  lock_acquire(&file->inode->w);
+#endif
   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
+#ifdef USERPROG
+  lock_release(&file->inode->w);
+#endif
   return bytes_written;
 }
 
@@ -110,7 +148,14 @@ off_t
 file_write_at (struct file *file, const void *buffer, off_t size,
                off_t file_ofs) 
 {
-  return inode_write_at (file->inode, buffer, size, file_ofs);
+#ifdef USERPROG
+  lock_acquire(&file->inode->w);
+#endif
+  off_t ret = inode_write_at (file->inode, buffer, size, file_ofs);
+#ifdef USERPROG
+  lock_release(&file->inode->w);
+#endif
+  return ret;
 }
 
 /* Prevents write operations on FILE's underlying inode
@@ -164,5 +209,6 @@ off_t
 file_tell (struct file *file) 
 {
   ASSERT (file != NULL);
-  return file->pos;
+  off_t pos = file->pos;
+  return pos;
 }
