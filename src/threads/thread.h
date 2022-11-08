@@ -90,6 +90,8 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    
+    int wakeup_tick;                    /* 깨어나야 할 tick을 저장한다. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -108,9 +110,6 @@ struct thread
     bool load_success;
 
     struct file* fd[128];
-
-    /* 깨어나야 할 tick을 저장한다. */
-    int wakeup_tick;
 #endif
 
     /* Owned by thread.c. */
