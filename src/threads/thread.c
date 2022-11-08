@@ -92,6 +92,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  
+  list_init(&sleep_queue);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -588,6 +590,46 @@ allocate_tid (void)
 
   return tid;
 }
+
+void update_next_tick_to_awake(int64_t ticks){
+  next_tick_to_awake = (next_tick_to_awake > ticks) ? ticks : next_tick_to_awake;
+}
+int64_t get_next_tick_to_awake(void){
+  return next_tick_to_awake;
+}
+void thread_sleep(int64_t ticks){
+  /* 해당 과정중에는 인터럽트를 받아들이지 않는다. blocked 상태가 되고있는 도중에 ready가 되면 문제가 생길 것이다. */
+  enum intr_level old_level;
+  old_level = intr_disable();
+  struct thread *cur = thread_current();
+  /* 현재 스레드가 idle 스레드가 아닐경우 thread의 상태를 BLOCKED로 바꾸고 next_tick_to_awake를 업데이트한다.*/
+  ASSERT(cur != idle_thread);
+  update_next_tick_to_awake(cur-> wakeup_tick = ticks);
+  /* 현재 스레드를 슬립 큐에 삽입한다. */
+  list_push_back(&sleep_queue, &cur->elem);
+  /* 이 스레드를 블락하고 다시 READY list에 있는 thread를 실행 */
+  thread_block();
+  /* 다시 interrupt를 받아들이도록 한다. */
+  intr_set_level(old_level);
+}
+void thread_awake(int64_t ticks){
+  next_tick_to_awake = INT64_MAX;
+  struct list_elem *e = list_begin(&sleep_queue);
+  while(e != list_end(&sleep_queue)){
+    struct thread * t = list_entry(e, struct thread, elem);
+    /* 현재 tick이 깨워야 할 tick 보다 크거나 같다면 슬립 큐에서 제거하고 unblock 한다. */
+    if(ticks >= t->wakeup_tick){
+      e = list_remove(&t->elem);
+      thread_unblock(t);
+    }
+    /* 아직 깨우면 안되는 thread들 중에서 next_tick_to_awake를 갱신한다. */
+    else{
+      e = list_next(e);
+      update_next_tick_to_awake(t->wakeup_tick);
+    }
+  }
+}
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

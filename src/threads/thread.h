@@ -106,8 +106,11 @@ struct thread
     struct semaphore exit_sema;
 
     bool load_success;
-    
+
     struct file* fd[128];
+
+    /* 깨어나야 할 tick을 저장한다. */
+    int wakeup_tick;
 #endif
 
     /* Owned by thread.c. */
@@ -137,6 +140,17 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
+/* 실행 중인 스레드를 슬립으로 만듬.
+   ticks 때 깨운다. */
+void thread_sleep(int64_t ticks);
+/* 슬립큐에서 스레드를 깨움 */
+void thread_awake(int64_t ticks); 
+/*최소 틱을 가진 스레드를 저장/업데이트 */
+void update_next_tick_to_awake(int64_t ticks);
+/* next_tick_to_awake 반환 */
+int64_t get_next_tick_to_awake(void); 
+static struct list sleep_queue; /* THREAD_BLOCKED 상태의 스레드를 관리하기 위한 리스트  */
+static int64_t next_tick_to_awake; /* sleep_list 에서 대기중인 스레드들의 wakeup_tick 값 중 최소값을 저장 */
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);

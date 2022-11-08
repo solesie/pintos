@@ -92,8 +92,9 @@ timer_sleep (int64_t ticks)
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+#ifdef USERPROG
+  thread_sleep(start + ticks);
+#endif
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -166,12 +167,19 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/* Timer interrupt handler. */
+/* Timer interrupt handler.
+   매 tick마다 이 interrupt가 호출된다.
+   이 interrupt는 intr_disable 된 상태에서 호출되도록 timer_init에서 설정되어있다. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+  /* 매 tick마다 sleep queue에서 깨어날 thread가 있는지 확인하여, 깨우는 함수를 호출하도록 한다.
+     If it is the case, thread_unblock()을 통해 READY list에 삽입한다. */
+  if(get_next_tick_to_awake() <= ticks){
+    thread_awake(ticks);
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
