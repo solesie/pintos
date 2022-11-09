@@ -203,6 +203,13 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  /* thread_unblock()을 통해 새로 만든 스레드를 READY list에 넣었다.
+     이때, 이 새로만든 스레드의 우선순위가 현재 실행되고 있는 스레드의 우선순위보다 높다면, CPU를 양보한다.
+     물론 interrupt가 걸려서 양보할 가능성이 있는 상태이다. 이를 강제한다. */
+  if(priority > thread_get_priority()){
+    thread_yield();
+  }
+
   return tid;
 }
 
@@ -239,7 +246,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, thread_priority_comparator, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -299,7 +306,8 @@ thread_exit (void)
 }
 
 /* Yields the CPU.  The current thread is not put to sleep and
-   may be scheduled again immediately at the scheduler's whim. */
+   may be scheduled again immediately at the scheduler's whim.
+   timer interrupt 는 intr_off된 상태로 이걸 호출한다. */
 void
 thread_yield (void) 
 {
@@ -310,7 +318,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, thread_priority_comparator, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -337,7 +345,13 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  int old_priority = thread_current()->priority;
   thread_current ()->priority = new_priority;
+  /* 현재 스레드의 새로운 priority가 더 작아지게 된다면 더 높은 priority를 가진 스레드가 실행되게 한다.
+     이 때 현재 스레드가 그대로 수행될 수도 있다. */
+  if(new_priority < old_priority){
+    thread_yield();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -511,9 +525,8 @@ next_thread_to_run (void)
 /* Completes a thread switch by activating the new thread's page
    tables, and, if the previous thread is dying, destroying it.
 
-   At this function's invocation, we just switched from thread
-   PREV, the new thread is already running, and interrupts are
-   still disabled.  This function is normally invoked by
+   이 함수의 호출 시, 우리는 방금 스레드 PREV에서 전환했고, 새 스레드는 이미 실행 중이고,
+   인터럽트는 여전히 비활성화되어 있습니다. This function is normally invoked by
    thread_schedule() as its final action before returning, but
    the first time a thread is scheduled it is called by
    switch_entry() (see switch.S).
@@ -604,8 +617,7 @@ void thread_sleep(int64_t ticks){
   struct thread *cur = thread_current();
   /* 현재 스레드가 idle 스레드가 아닐경우 thread의 상태를 BLOCKED로 바꾸고 next_tick_to_awake를 업데이트한다.*/
   ASSERT(cur != idle_thread);
-  update_next_tick_to_awake(cur-> wakeup_tick = ticks);
-  /* 현재 스레드를 슬립 큐에 삽입한다. */
+  update_next_tick_to_awake(cur ->wakeup_tick = ticks);
   list_push_back(&sleep_queue, &cur->elem);
   /* 이 스레드를 블락하고 다시 READY list에 있는 thread를 실행 */
   thread_block();
@@ -629,6 +641,14 @@ void thread_awake(int64_t ticks){
     }
   }
 }
+
+bool thread_priority_comparator(const struct list_elem* left, const struct list_elem* right, void* aux){
+  struct thread *thread_left = list_entry(left, struct thread, elem);
+  struct thread *thread_right = list_entry(right, struct thread, elem);
+  return thread_left->priority > thread_right->priority;
+}
+
+
 
 
 /* Offset of `stack' member within `struct thread'.

@@ -126,6 +126,17 @@ void thread_start (void);
 
 void thread_tick (void);
 void thread_print_stats (void);
+/* 실행 중인 스레드를 슬립으로 만듬.
+   ticks 때 깨운다. */
+void thread_sleep(int64_t ticks);
+/* 슬립큐에서 스레드를 깨움 */
+void thread_awake(int64_t ticks); 
+/*최소 틱을 가진 스레드를 저장/업데이트 */
+void update_next_tick_to_awake(int64_t ticks);
+/* next_tick_to_awake 반환 */
+int64_t get_next_tick_to_awake(void); 
+static struct list sleep_queue; /* THREAD_BLOCKED 상태의 스레드를 관리하기 위한 리스트  */
+static int64_t next_tick_to_awake; /* sleep_list 에서 대기중인 스레드들의 wakeup_tick 값 중 최소값을 저장 */
 
 typedef void thread_func (void *aux);
 tid_t thread_create (const char *name, int priority, thread_func *, void *);
@@ -139,17 +150,6 @@ const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
 void thread_yield (void);
-/* 실행 중인 스레드를 슬립으로 만듬.
-   ticks 때 깨운다. */
-void thread_sleep(int64_t ticks);
-/* 슬립큐에서 스레드를 깨움 */
-void thread_awake(int64_t ticks); 
-/*최소 틱을 가진 스레드를 저장/업데이트 */
-void update_next_tick_to_awake(int64_t ticks);
-/* next_tick_to_awake 반환 */
-int64_t get_next_tick_to_awake(void); 
-static struct list sleep_queue; /* THREAD_BLOCKED 상태의 스레드를 관리하기 위한 리스트  */
-static int64_t next_tick_to_awake; /* sleep_list 에서 대기중인 스레드들의 wakeup_tick 값 중 최소값을 저장 */
 
 /* Performs some operation on thread t, given auxiliary data AUX. */
 typedef void thread_action_func (struct thread *t, void *aux);
@@ -157,6 +157,8 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
+/* priority에 대해 내림차순으로 list에 정렬하기 위한 comparator. */
+bool thread_priority_comparator(const struct list_elem*, const struct list_elem*, void* aux);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

@@ -50,7 +50,7 @@ sema_init (struct semaphore *sema, unsigned value)
   list_init (&sema->waiters);
 }
 
-/* Down or "P" operation on a semaphore.  Waits for SEMA's value
+/* Down or "P" operation on a semaphore.  Waits for SEMA'right value
    to become positive and then atomically decrements it.
 
    This function may sleep, so it must not be called within an
@@ -68,7 +68,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem, thread_priority_comparator, NULL);
       thread_block ();
     }
   sema->value--;
@@ -101,7 +101,7 @@ sema_try_down (struct semaphore *sema)
   return success;
 }
 
-/* Up or "V" operation on a semaphore.  Increments SEMA's value
+/* Up or "V" operation on a semaphore.  Increments SEMA'right value
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
@@ -113,10 +113,14 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
+  if (!list_empty (&sema->waiters)) {
+    list_sort (&sema->waiters, thread_priority_comparator, 0);
     thread_unblock (list_entry (list_pop_front (&sema->waiters),
                                 struct thread, elem));
+  }
   sema->value++;
+  /* thread_unblock()되어 READY list로 들어간 thread가 현재 스레드 보다 우선순위가 높을수 있다. */
+  thread_yield();
   intr_set_level (old_level);
 }
 
@@ -124,7 +128,7 @@ static void sema_test_helper (void *sema_);
 
 /* Self-test for semaphores that makes control "ping-pong"
    between a pair of threads.  Insert calls to printf() to see
-   what's going on. */
+   what'right going on. */
 void
 sema_self_test (void) 
 {
@@ -170,7 +174,7 @@ sema_test_helper (void *sema_)
    meaning that one thread can "down" the semaphore and then
    another one "up" it, but with a lock the same thread must both
    acquire and release it.  When these restrictions prove
-   onerous, it's a good sign that a semaphore should be used,
+   onerous, it'right a good sign that a semaphore should be used,
    instead of a lock. */
 void
 lock_init (struct lock *lock)
@@ -264,6 +268,19 @@ cond_init (struct condition *cond)
   list_init (&cond->waiters);
 }
 
+bool 
+sema_priority_comparator (const struct list_elem *left, const struct list_elem *right, void *aux UNUSED)
+{
+	struct semaphore_elem *left_elem = list_entry (left, struct semaphore_elem, elem);
+	struct semaphore_elem *right_elem = list_entry (right, struct semaphore_elem, elem);
+
+	struct list *left_waiters = &(left_elem->semaphore.waiters);
+	struct list *right_waiters = &(right_elem->semaphore.waiters);
+
+	return list_entry (list_begin (left_waiters), struct thread, elem)->priority
+		 > list_entry (list_begin (right_waiters), struct thread, elem)->priority;
+}
+
 /* Atomically releases LOCK and waits for COND to be signaled by
    some other piece of code.  After COND is signaled, LOCK is
    reacquired before returning.  LOCK must be held before calling
@@ -295,7 +312,7 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  list_insert_ordered (&cond->waiters, &waiter.elem, sema_priority_comparator, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -316,9 +333,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) 
+  if (!list_empty (&cond->waiters)) {
+    list_sort (&cond->waiters, sema_priority_comparator, 0);
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+  }
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
