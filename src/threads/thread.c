@@ -57,6 +57,9 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
 /* Project #3 */
 bool thread_prior_aging;
+/* sema_up에서 thread_yield()는 vtop()을 호출하는데, 이를 사용하려면 paging_init()을 먼저 호출해야 한다.
+   thread가 시작되고 나서 yield 되는 것이 옳다고 여긴다. */
+bool threading_started = false;
 
 static int load_avg;            /* 1분동안 수행가능한 스레드의 평균 개수, 크면 priority는 천천히 증가 */
 
@@ -116,6 +119,7 @@ thread_init (void)
 void
 thread_start (void) 
 {
+  threading_started = true;
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
@@ -231,6 +235,7 @@ thread_create (const char *name, int priority,
 void
 thread_block (void) 
 {
+  if(!threading_started) return;
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 
@@ -320,6 +325,7 @@ thread_exit (void)
 void
 thread_yield (void) 
 {
+  if(!threading_started) return;
   struct thread *cur = thread_current ();
   enum intr_level old_level;
   
@@ -377,14 +383,15 @@ thread_set_nice (int nice UNUSED)
 {
   struct thread* t = thread_current();
   t->nice = nice;
-  update_priority(t->priority);
-  if (t->priority > PRI_MAX) {
-      t->priority = PRI_MAX;
-  }
-  if (t->priority < PRI_MIN) {
-      t->priority = PRI_MIN;
-  }
-  int max_priority = -1;
+  //update_priority(t->priority);
+  t->priority = fp_sub_fp(fp_sub_fp(fp_add_int(0, PRI_MAX), fp_div_int(t->recent_cpu, 4)), fp_mul_int(fp_add_int(0, t->nice),2)) / FRACTION_SHIFT;
+    if (t->priority > PRI_MAX) {
+        t->priority = PRI_MAX;
+    }
+    if (t->priority < PRI_MIN) {
+        t->priority = PRI_MIN;
+    }
+
   /* 지금 돌아가는 스레드가 우선순위가 더 낮아졌을 수도 있다. */
   thread_yield();
 }
@@ -675,8 +682,9 @@ void update_priority(struct thread *t){
     if (t != idle_thread) {
         int recent_cpu_div4 = fp_div_int(t->recent_cpu, 4);
         int nice_mul_2 = 2 * t->nice;
-        int minus_priority = fp_sub_int(fp_add_int(recent_cpu_div4, nice_mul_2), (int)PRI_MAX);
-        int pri_result = fp_sub_fp(0, minus_priority) / FRACTION_SHIFT;
+        int64_t temp = fp_add_int(recent_cpu_div4, nice_mul_2);
+        int pri_result = fp_sub_fp(fp_add_int(0,PRI_MAX), temp) / FRACTION_SHIFT;
+        
         if (pri_result < PRI_MIN)
             pri_result = PRI_MIN;
         if (pri_result > PRI_MAX)

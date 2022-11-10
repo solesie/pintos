@@ -408,7 +408,7 @@ static void
 locate_block_device (enum block_type role, const char *name)
 {
   struct block *block = NULL;
-
+  
   if (name != NULL)
     {
       block = block_get_by_name (name);
@@ -421,7 +421,6 @@ locate_block_device (enum block_type role, const char *name)
         if (block_type (block) == role)
           break;
     }
-
   if (block != NULL)
     {
       printf ("%s: using %s\n", block_type_name (role), block_name (block));

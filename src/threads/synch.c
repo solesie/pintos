@@ -119,8 +119,10 @@ sema_up (struct semaphore *sema)
                                 struct thread, elem));
   }
   sema->value++;
-  /* thread_unblock()되어 READY list로 들어간 thread가 현재 스레드 보다 우선순위가 높을수 있다. */
-  thread_yield();
+  /* thread_unblock()되어 READY list로 들어간 thread가 현재 스레드 보다 우선순위가 높을수 있다.
+     그러나 Unfortunately, locks are used prior to the scheduler being ready! */
+  if(!intr_context())
+    thread_yield();
   intr_set_level (old_level);
 }
 
