@@ -354,6 +354,7 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if(thread_mlfqs) return;
   int old_priority = thread_current()->priority;
   thread_current ()->priority = new_priority;
   /* 현재 스레드의 새로운 priority가 더 작아지게 된다면 더 높은 priority를 가진 스레드가 실행되게 한다.
@@ -374,7 +375,18 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+  struct thread* t = thread_current();
+  t->nice = nice;
+  update_priority(t->priority);
+  if (t->priority > PRI_MAX) {
+      t->priority = PRI_MAX;
+  }
+  if (t->priority < PRI_MIN) {
+      t->priority = PRI_MIN;
+  }
+  int max_priority = -1;
+  /* 지금 돌아가는 스레드가 우선순위가 더 낮아졌을 수도 있다. */
+  thread_yield();
 }
 
 /* Returns the current thread's nice value. */

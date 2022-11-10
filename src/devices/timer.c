@@ -172,14 +172,8 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-  thread_tick ();
-  /* 매 tick마다 sleep queue에서 깨어날 thread가 있는지 확인하여, 깨우는 함수를 호출하도록 한다.
-     If it is the case, thread_unblock()을 통해 READY list에 삽입한다. */
-  if(get_next_tick_to_awake() <= ticks){
-    thread_awake(ticks);
-  }
 
-  if (thread_prior_aging) {
+  if (thread_prior_aging || thread_mlfqs) {
       increment_running_thread_recent_cpu();
     if (timer_ticks() % TIMER_FREQ == 0) {
       update_all_thread_recent_cpu();
@@ -189,6 +183,12 @@ timer_interrupt (struct intr_frame *args UNUSED)
       update_all_thread_priority();
     }
   }
+  /* 매 tick마다 sleep queue에서 깨어날 thread가 있는지 확인하여, 깨우는 함수를 호출하도록 한다.
+     If it is the case, thread_unblock()을 통해 READY list에 삽입한다. */
+  if(get_next_tick_to_awake() <= ticks){
+    thread_awake(ticks);
+  }
+  thread_tick ();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

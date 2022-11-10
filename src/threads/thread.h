@@ -169,7 +169,7 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
-void update_load_avg(void)
+void update_load_avg(void);
 void increment_running_thread_recent_cpu(void);
 void update_all_thread_recent_cpu(void);
 void update_all_thread_priority(void);
