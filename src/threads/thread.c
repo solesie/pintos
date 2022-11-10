@@ -15,6 +15,8 @@
 #include "userprog/process.h"
 #endif
 
+#include "threads/fixed-point.h"
+
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
    of thread.h for details. */
@@ -53,6 +55,10 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+/* Project #3 */
+bool thread_prior_aging;
+
+static int load_avg;            /* 1분동안 수행가능한 스레드의 평균 개수, 크면 priority는 천천히 증가 */
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -89,6 +95,7 @@ thread_init (void)
 {
   ASSERT (intr_get_level () == INTR_OFF);
 
+  load_avg = 0;
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
@@ -98,6 +105,8 @@ thread_init (void)
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
   init_thread (initial_thread, "main", PRI_DEFAULT);
+  initial_thread->nice = 0;
+  initial_thread->recent_cpu = 0;
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid ();
 }
@@ -372,24 +381,21 @@ thread_set_nice (int nice UNUSED)
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice; 
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_mul_int(load_avg, 100) / FRACTION_SHIFT;
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return fp_mul_int(thread_current()->recent_cpu, 100) / FRACTION_SHIFT;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -484,7 +490,7 @@ init_thread (struct thread *t, const char *name, int priority)
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
-  #ifdef USERPROG
+#ifdef USERPROG
   //fd 초기화
   memset(t->fd, NULL, sizeof(t->fd));
   //child semaphore 초기화
@@ -492,7 +498,11 @@ init_thread (struct thread *t, const char *name, int priority)
   sema_init(&(t->wait_sema), 0);
   list_init(&(t->child));
   list_push_back(&(running_thread()->child), &(t->child_elem));
-  #endif
+#endif
+
+  /* pintos manual: recent_cpu, nice는 부모 thread로 부터 상속된 값을 가진다. */
+  t->recent_cpu = running_thread()->recent_cpu; 
+  t->nice = running_thread()->nice; 
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and
@@ -648,7 +658,60 @@ bool thread_priority_comparator(const struct list_elem* left, const struct list_
   return thread_left->priority > thread_right->priority;
 }
 
+void update_priority(struct thread *t){
+	/* idle_thread(main thread)의 priority는 고정이다. */
+    if (t != idle_thread) {
+        int recent_cpu_div4 = fp_div_int(t->recent_cpu, 4);
+        int nice_mul_2 = 2 * t->nice;
+        int minus_priority = fp_sub_int(fp_add_int(recent_cpu_div4, nice_mul_2), (int)PRI_MAX);
+        int pri_result = fp_sub_fp(0, minus_priority) / FRACTION_SHIFT;
+        if (pri_result < PRI_MIN)
+            pri_result = PRI_MIN;
+        if (pri_result > PRI_MAX)
+            pri_result = PRI_MAX;
+        t->priority = pri_result;
+    }
+}
+void update_recent_cpu(struct thread *t){
+	/* idle_thread(main thread)의 recent_cpu는 고정이다. */
+    if (t != idle_thread) {
+        int load_avg_mul2 = fp_mul_int(load_avg, 2);
+        int load_avg_mul2_add1 = fp_add_int(load_avg_mul2, 1);
+        int result = fp_mul_fp(fp_div_fp(load_avg_mul2, load_avg_mul2_add1), t->recent_cpu);
+        result = fp_add_int(result, t->nice);
+        /* recent_cpu는 음수가 될 수 없다. */
+        if ((result >> 31) == (-1) >> 31) {
+            result = 0;
+        }
+        t->recent_cpu = result;
+    }
+}
+void update_load_avg(void){
+	// load_avg = (59/60) * load_avg + (1/60) * ready_threads;
+    int ready_threads = (int)list_size(&ready_list);
+    /* 현재 스레드도 고려해서 +1을 해준다. */
+    ready_threads = (thread_current() == idle_thread) ? ready_threads : ready_threads + 1;
+    load_avg = fp_div_int(fp_add_int(fp_mul_int(load_avg, 59), ready_threads), 60);
+}
 
+void increment_running_thread_recent_cpu(void){
+  if (thread_current() != idle_thread) {
+        int cur_recent_cpu = thread_current()->recent_cpu;
+        thread_current()->recent_cpu = fp_add_int(cur_recent_cpu, 1);
+  }
+}
+
+void update_all_thread_recent_cpu(void) {
+    for (struct list_elem *tmp = list_begin(&all_list); tmp != list_end(&all_list); tmp = list_next(tmp)) {
+        update_recent_cpu(list_entry(tmp, struct thread, allelem));
+    }
+}
+
+void update_all_thread_priority(void) {
+    for (struct list_elem *tmp = list_begin(&all_list); tmp != list_end(&all_list); tmp = list_next(tmp)) {
+        update_priority(list_entry(tmp, struct thread, allelem));
+    }
+}
 
 
 /* Offset of `stack' member within `struct thread'.

@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include "synch.h"
 
+/* Project #3 */
+extern bool thread_prior_aging;
+
 /* States in a thread's life cycle. */
 enum thread_status
   {
@@ -92,6 +95,8 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
     
     int wakeup_tick;                    /* 깨어나야 할 tick을 저장한다. */
+    int recent_cpu;                     /* 최근에 얼마나 많은 cpu time을 사용했는가.(클수록 priority 낮아짐) */
+    int nice;                           /* nice가 클수록 양보하는 정도가 크다.(클수록 priority 낮아짐) */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
@@ -164,5 +169,10 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void update_load_avg(void)
+void increment_running_thread_recent_cpu(void);
+void update_all_thread_recent_cpu(void);
+void update_all_thread_priority(void);
+
 
 #endif /* threads/thread.h */

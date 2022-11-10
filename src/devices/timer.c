@@ -178,6 +178,17 @@ timer_interrupt (struct intr_frame *args UNUSED)
   if(get_next_tick_to_awake() <= ticks){
     thread_awake(ticks);
   }
+
+  if (thread_prior_aging) {
+      increment_running_thread_recent_cpu();
+    if (timer_ticks() % TIMER_FREQ == 0) {
+      update_all_thread_recent_cpu();
+      update_load_avg();
+    }
+    if (timer_ticks() % 4 == 0) {
+      update_all_thread_priority();
+    }
+  }
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
