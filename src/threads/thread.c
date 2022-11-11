@@ -383,14 +383,7 @@ thread_set_nice (int nice UNUSED)
 {
   struct thread* t = thread_current();
   t->nice = nice;
-  //update_priority(t->priority);
-  t->priority = fp_sub_fp(fp_sub_fp(fp_add_int(0, PRI_MAX), fp_div_int(t->recent_cpu, 4)), fp_mul_int(fp_add_int(0, t->nice),2)) / FRACTION_SHIFT;
-    if (t->priority > PRI_MAX) {
-        t->priority = PRI_MAX;
-    }
-    if (t->priority < PRI_MIN) {
-        t->priority = PRI_MIN;
-    }
+  update_priority(t);
 
   /* 지금 돌아가는 스레드가 우선순위가 더 낮아졌을 수도 있다. */
   thread_yield();
