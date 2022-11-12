@@ -172,21 +172,20 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-
-  if (thread_prior_aging || thread_mlfqs) {
-      increment_running_thread_recent_cpu();
-    if (timer_ticks() % TIMER_FREQ == 0) {
-      update_all_thread_recent_cpu();
-      update_load_avg();
-    }
-    if (timer_ticks() % 4 == 0) {
-      update_all_thread_priority();
-    }
-  }
   /* 매 tick마다 sleep queue에서 깨어날 thread가 있는지 확인하여, 깨우는 함수를 호출하도록 한다.
      If it is the case, thread_unblock()을 통해 READY list에 삽입한다. */
   if(get_next_tick_to_awake() <= ticks){
     thread_awake(ticks);
+  }
+  if (thread_prior_aging || thread_mlfqs) {
+      increment_running_thread_recent_cpu();
+    if (timer_ticks() % TIMER_FREQ == 0) {
+      update_load_avg();
+      update_all_thread_recent_cpu();
+    }
+    if (timer_ticks() % 4 == 0) {
+      update_all_thread_priority();
+    }
   }
   thread_tick ();
 }
