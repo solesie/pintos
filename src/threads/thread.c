@@ -321,7 +321,7 @@ thread_exit (void)
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim.
-   timer interrupt 는 intr_off된 상태로 이걸 호출한다. */
+   intr_handler() 는 외부인터럽트 중에서도 타이머 인터럽트인 경우에만, intr_off된 상태로 이걸 호출한다. */
 void
 thread_yield (void) 
 {
