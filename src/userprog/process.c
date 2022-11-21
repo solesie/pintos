@@ -18,7 +18,14 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "vm/frame.h"
+
 #include "filesys/inode.h"
+
+#ifndef VM
+#define vm_frame_allocate(x, y) palloc_get_page(x)
+#define vm_frame_free(x) palloc_free_page(x)
+#endif
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -529,23 +536,27 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+      // 1. kernel virtual page(=frame)를 할당받는다.
       /* Get a page of memory. */
-      uint8_t *kpage = palloc_get_page (PAL_USER);
+      uint8_t *kpage = vm_frame_allocate (PAL_USER, upage);
       if (kpage == NULL)
         return false;
 
+      // 2. file의 내용을 읽어 kernel virtual page(=frame)에 쓴다.
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          palloc_free_page (kpage);
+          vm_frame_free (kpage);
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
+      // 3. user page의 logical address로 page-directory -> page-table을 따라 찾아가면 나오는 pte에
+      //    kernel virtual page(frame)을 연관시킨다.
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          palloc_free_page (kpage);
+          vm_frame_free (kpage);
           return false; 
         }
 
@@ -565,7 +576,9 @@ setup_stack (void **esp)
   uint8_t *kpage;
   bool success = false;
 
-  kpage = palloc_get_page (PAL_USER | PAL_ZERO);
+  /* virtual memory는 프로세스마다 독립적이다.
+     프로세스마다 user space인 PHYS_BASE - PGSIZE에 한 페이지 크기의 스택을 마련한다. */
+  kpage = vm_frame_allocate (PAL_USER | PAL_ZERO, PHYS_BASE - PGSIZE);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
