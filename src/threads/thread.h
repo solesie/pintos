@@ -5,6 +5,8 @@
 #include <list.h>
 #include <stdint.h>
 #include "synch.h"
+#include "vm/page.h"
+#include <hash.h>
 
 /* Project #3 */
 extern bool thread_prior_aging;
@@ -115,6 +117,10 @@ struct thread
     bool load_success;
 
     struct file* fd[128];
+#endif
+
+#ifdef VM
+    struct hash spt;
 #endif
 
     /* Owned by thread.c. */
