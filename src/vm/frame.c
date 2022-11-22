@@ -46,12 +46,12 @@ struct frame_table_entry{
               <PintOs Physical memory(64mb)>                                  <PintOs Virtual memory(4GB)> */
 
     void* kernel_virtual_page;  /* (In PintOs) kernel space of virtual memory는
-                                    physical memory에 완벽히 1:1 대응되어 매핑된다.
+                                    physical memory에 완벽히 1:1 대응되어 매핑된다. 즉, 이 변수가 frame이라 여기면 된다.
                                     kernel page of virtual memory 주소를 저장한다. */
+    void* user_page;            /* kernel_virtual_page가 저장하는 user_page의 주소 */
 
     struct hash_elem elem;      /* see ::frame_table */
 
-    void* user_page;            /* kernel_virtual_page가 저장하는 user_page의 주소 */
     struct thread *t;           /* 이 엔트리와 연관된 thread */
 
     bool important;             /* if true, never be evicted.
@@ -96,7 +96,7 @@ void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
 }
 
 /* 인자로 받은 frame을 frame table에서 없애고 free한다. */
-void* vm_frame_free (void* kernel_virtual_page){
+void vm_frame_free (void* kernel_virtual_page){
   lock_acquire (&frame_table_lock);
   ASSERT(is_kernel_vaddr(kernel_virtual_page));
   
@@ -117,7 +117,7 @@ void* vm_frame_free (void* kernel_virtual_page){
 static unsigned frame_table_hash_func(const struct hash_elem *e, void* aux UNUSED)
 {
   struct frame_table_entry* fte = hash_entry(e, struct frame_table_entry, elem);
-  return hash_bytes(&fte->kernel_virtual_page, sizeof fte->kernel_virtual_page);
+  return hash_int((int)fte->kernel_virtual_page);
 }
 static bool frame_table_less_func(const struct hash_elem *a, const struct hash_elem *b, void *aux UNUSED)
 {

@@ -19,6 +19,7 @@
 #include "threads/vaddr.h"
 
 #include "vm/frame.h"
+#include "vm/page.h"
 
 #include "filesys/inode.h"
 
@@ -156,6 +157,10 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
 
+  /* (PANIC 발생 시 예외) 이 스레드가 점유하고있는 global lock들을 해제해야한다. (implement later) */
+
+  /* spt 메모리 해제 (implement later) */
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -173,17 +178,16 @@ process_exit (void)
       pagedir_destroy (pd);
     }
 
-  /* 이 프로세스가 종료될 때, 자식 프로세스는 모두 종료가 가능하게 된다. */
-  struct list_elem *e;
-  for (e = list_begin (&cur->child); 
-       e != list_end (&cur->child); e = list_next(e)) 
-    {
-      struct thread *c = list_entry (e, struct thread, child_elem);
-      sema_up (&c->exit_sema);
-    }
+  /* 이 프로세스가 종료될 때, 자식 프로세스는 모두 종료가 가능하게 된다.
+     list 메모리를 해제한다. */
+  while (!list_empty(&cur->child)) {
+    struct list_elem *e = list_pop_front (&cur->child);
+    struct thread *c = list_entry (e, struct thread, child_elem);
+    sema_up (&c->exit_sema);
+  }
 
-  sema_up(&(cur->wait_sema)); // cur이 wait하고 있다면 실행될 수 있도록 한다.
-  sema_down(&(cur->exit_sema)); // cur이 exit()를 통해 exit_sema를 올리거나, 부모가 종료되기 전까지 이 함수는 종료되지 않는다.(zombie)
+  sema_up(&(cur->wait_sema)); // cur을 wait하고 있다면 실행될 수 있도록 한다.
+  sema_down(&(cur->exit_sema)); // cur이 wait()를 통해 exit_sema를 올리거나, 부모가 종료되기 전까지 이 함수는 종료되지 않는다.(zombie)
 }
 
 /* Sets up the CPU for running user code in the current
@@ -292,6 +296,10 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
+#ifdef VM
+  /* spt 할당 */
+  vm_spt_create(&(t->spt));
+#endif
   if (t->pagedir == NULL) 
     goto done;
   process_activate ();
