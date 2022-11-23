@@ -185,7 +185,7 @@ process_exit (void)
     struct thread *c = list_entry (e, struct thread, child_elem);
     sema_up (&c->exit_sema);
   }
-
+  
   sema_up(&(cur->wait_sema)); // cur을 wait하고 있다면 실행될 수 있도록 한다.
   sema_down(&(cur->exit_sema)); // cur이 wait()를 통해 exit_sema를 올리거나, 부모가 종료되기 전까지 이 함수는 종료되지 않는다.(zombie)
 }
