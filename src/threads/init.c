@@ -122,6 +122,7 @@ main (void)
 
   /* Start thread scheduler and enable interrupts. */
   thread_start ();
+  threading_started = true;
   serial_init_queue ();
   timer_calibrate ();
 

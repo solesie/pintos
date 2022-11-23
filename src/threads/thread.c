@@ -31,7 +31,7 @@ static struct list ready_list;
 static struct list all_list;
 
 /* Idle thread. */
-static struct thread *idle_thread;
+struct thread *idle_thread;
 
 /* Initial thread, the thread running init.c:main(). */
 static struct thread *initial_thread;
@@ -119,7 +119,6 @@ thread_init (void)
 void
 thread_start (void) 
 {
-  threading_started = true;
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
@@ -235,7 +234,6 @@ thread_create (const char *name, int priority,
 void
 thread_block (void) 
 {
-  if(!threading_started) return;
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
 

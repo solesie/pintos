@@ -111,18 +111,20 @@ sema_up (struct semaphore *sema)
   enum intr_level old_level;
 
   ASSERT (sema != NULL);
-
+  struct thread* t;
   old_level = intr_disable ();
+  
   if (!list_empty (&sema->waiters)) {
     list_sort (&sema->waiters, thread_priority_comparator, 0);
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+    
+    t = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+    thread_unblock (t);
+    /* thread_unblock()되어 READY list로 들어간 thread가 현재 스레드 보다 우선순위가 높을수 있다.
+     그러나 Unfortunately, locks are used prior to the scheduler being ready! */
+    if(!intr_context() && thread_current() != idle_thread && thread_current()->priority < t->priority)
+      thread_yield();
   }
   sema->value++;
-  /* thread_unblock()되어 READY list로 들어간 thread가 현재 스레드 보다 우선순위가 높을수 있다.
-     그러나 Unfortunately, locks are used prior to the scheduler being ready! */
-  if(!intr_context())
-    thread_yield();
   intr_set_level (old_level);
 }
 

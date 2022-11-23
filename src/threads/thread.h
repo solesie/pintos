@@ -10,6 +10,11 @@
 
 /* Project #3 */
 extern bool thread_prior_aging;
+/* Idle thread. */
+extern struct thread *idle_thread;
+/* sema_up에서 thread_yield()는 vtop()을 호출하는데, 이를 사용하려면 paging_init()을 먼저 호출해야 한다.
+   thread가 시작되고 나서 yield 되는 것이 옳다고 여긴다. */
+extern bool threading_started;
 
 /* States in a thread's life cycle. */
 enum thread_status
