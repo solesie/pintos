@@ -9,8 +9,10 @@ struct inode;
 /* E.G) p1에서 file의 정보를 read 으로 수정(pos 등등이 바뀔 것)하는 상황이라 가정하자. 
    context switching 걸려서 p2로 바뀐 후, p2에서 해당 파일을 read 한다고 해보자.
    pos가 바뀌는 와중에 context switching이 걸리는 바람에 pos가 바뀌지 않는다면 에러 발생할 것이다. 
-   이를 해결하기 위해 file 구조체의 내용을 수정할 때에는 mutex로 file 구조체의 내용이 올바르게 수정되도록 보호한다. */
-struct semaphore mutex_filetable;
+   이를 해결하기 위해 file 구조체의 내용을 수정할 때에는 mutex로 file 구조체의 내용이 올바르게 수정되도록 보호한다. 
+   
+   file table을 공유할 수 없는 상태(proj4 까지도)
+   struct semaphore mutex_filetable; */
 
 /* An open file. */
 struct file 

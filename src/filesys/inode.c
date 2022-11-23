@@ -10,6 +10,10 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
+/* 특정 inode에 대해 접근을 막는 lock.(very very strongly)
+   동일한 inode는 sync 하게 open 하는데 필요하다. */
+static struct lock** inode_lock;
+
 /* Returns the block device sector that contains byte offset POS
    within INODE.
    Returns -1 if INODE does not contain data for a byte at offset

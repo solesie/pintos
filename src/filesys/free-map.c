@@ -8,7 +8,8 @@
 static struct file *free_map_file;   /* Free map file. */
 static struct bitmap *free_map;      /* Free map, one bit per sector. */
 
-//static struct semaphore* iniode
+/* bitmap 조작만은 무조건 lock이 걸려져야 한다. */
+static struct lock bitmap_lock;
 
 /* Initializes the free map. */
 void

@@ -6,11 +6,6 @@
 #include "devices/block.h"
 #include "threads/synch.h"
 
-#ifdef USERPROG
-/* bitmap 조작만은 무조건 lock이 걸려져야 한다. */
-static struct lock bitmap_lock;
-#endif
-
 void free_map_init (void);
 void free_map_read (void);
 void free_map_create (void);

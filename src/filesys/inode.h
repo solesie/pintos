@@ -12,10 +12,6 @@
 
 struct bitmap;
 
-/* 특정 inode에 대해 접근을 막는 lock.(very very strongly)
-   동일한 inode는 sync 하게 open 하는데 필요하다. */
-static struct lock** inode_lock;
-
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long. */
 struct inode_disk
