@@ -585,6 +585,10 @@ setup_stack (void **esp)
   bool success = false;
 
   /* virtual memory는 프로세스마다 독립적이다.
+     가상 주소는 *esp = PHYS_BASE, ((uint8_t *) PHYS_BASE) - PGSIZE 처럼 같지만,
+     pagedir로 찾아가는 frame(여기서 kpage)는 프로세스마다 다르다.(= pte에 저장된 값이 서로 다르다)
+     virtual memory의 가장 핵심적인 부분...(중간고사 마지막 문제 참조)
+
      프로세스마다 user space인 PHYS_BASE - PGSIZE에 한 페이지 크기의 스택을 마련한다. */
   kpage = vm_frame_allocate (PAL_USER | PAL_ZERO, PHYS_BASE - PGSIZE);
   if (kpage != NULL) 
@@ -593,7 +597,7 @@ setup_stack (void **esp)
       if (success)
         *esp = PHYS_BASE;
       else
-        palloc_free_page (kpage);
+        vm_frame_free (kpage);
     }
   return success;
 }
@@ -606,7 +610,8 @@ setup_stack (void **esp)
    KPAGE should probably be a page obtained from the user pool
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
-   if memory allocation fails. */
+   if memory allocation fails.
+   @param kpage: page obtained from the user pool with palloc_get_page() */
 static bool
 install_page (void *upage, void *kpage, bool writable)
 {

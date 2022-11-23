@@ -189,7 +189,7 @@ thread_create (const char *name, int priority,
   ASSERT (function != NULL);
 
   /* Allocate thread. */
-  t = palloc_get_page (PAL_ZERO);
+  t = palloc_get_page (PAL_ZERO); // kernel pool에서 t를 위한 프레임 할당
   if (t == NULL)
     return TID_ERROR;
 

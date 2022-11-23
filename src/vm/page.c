@@ -9,6 +9,12 @@ void vm_spt_create(struct hash* supplemental_page_table){
     hash_init(supplemental_page_table, spte_hash_func, spte_less_func, NULL);
 }
 
+/* spt에   */
+bool vm_spt_set_page(struct hash* supplemental_page_table, void* user_page, void* kernel_virtual_page){
+  
+}
+
+
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux UNUSED){
   struct supplemental_page_table_entry *spte = hash_entry(elem, struct supplemental_page_table_entry, elem);
   return hash_int( (int)spte->user_page );
