@@ -619,6 +619,13 @@ install_page (void *upage, void *kpage, bool writable)
 
   /* Verify that there's not already a page at that virtual
      address, then map our page there. */
-  return (pagedir_get_page (t->pagedir, upage) == NULL
+  bool ret = (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+
+#ifdef VM
+  if(ret)
+    ret = ret && vm_spt_set_IN_FRAME_page(&t->spt, upage, kpage);
+#endif
+
+  return ret;
 }

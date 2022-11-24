@@ -15,6 +15,11 @@ void vm_spt_create(struct hash* spt){
 bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool){
   struct supplemental_page_table_entry* spte 
   = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
+
+  if(spte == NULL)
+    return false;
+
+  spte->user_page = user_page;
   spte->frame_data_clue = IN_FRAME;
   spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
 
