@@ -6,10 +6,9 @@
 #include "filesys/off_t.h"
 
 enum clue_of_frame_data{
-    FILE_SYSTEM,
-    SWAP,
-    ZEROING,
-    IN_PHYSICAL_MEMORY
+    SWAP,           /* swap disk에 존재한다. */
+    ZEROING,        
+    IN_FRAME        /* 현재 physical memory에 존재한다. */
 };
 /* supplemental page table은 추가적인 정보로 page table을 보완한다.
    즉, page table을 나타내고, per process이다.
@@ -30,7 +29,7 @@ enum clue_of_frame_data{
     (pte자체가 supplemental page table을 추적해도 되지만, 이는 advanced students only) */
 struct supplemental_page_table_entry{
     void *user_page;
-    void *kernel_vitual_page;           /* If the page is not on the frame, should be NULL. */
+    void *kernel_virtual_page_in_user_pool;           /* If the page is not on the frame, should be NULL. */
     
     struct hash_elem elem;
 
@@ -38,5 +37,6 @@ struct supplemental_page_table_entry{
 };
 
 void vm_spt_create(struct hash*);
+bool vm_spt_set_IN_FRAME_page(struct hash* , void* , void* );
 
 #endif /* vm/page.h */

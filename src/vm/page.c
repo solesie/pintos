@@ -5,15 +5,26 @@
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux);
 static bool spte_less_func(const struct hash_elem *, const struct hash_elem *, void *aux);
 
-void vm_spt_create(struct hash* supplemental_page_table){
-    hash_init(supplemental_page_table, spte_hash_func, spte_less_func, NULL);
+void vm_spt_create(struct hash* spt){
+    hash_init(spt, spte_hash_func, spte_less_func, NULL);
 }
 
-/* spt에   */
-bool vm_spt_set_page(struct hash* supplemental_page_table, void* user_page, void* kernel_virtual_page){
-  
-}
+/* spt에 user_page와 
+   physical_memory 상에 존재하는 kernel_virtual_page_in_user_pool를 
+   연관시킨 spte를 삽입한다. */
+bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool){
+  struct supplemental_page_table_entry* spte 
+  = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
+  spte->frame_data_clue = IN_FRAME;
+  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
 
+  if (hash_insert (spt, &spte->elem) == NULL) {
+    return true;
+  }
+  // 이미 spte가 존재하는 경우
+  free (spte);
+  return false;
+}
 
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux UNUSED){
   struct supplemental_page_table_entry *spte = hash_entry(elem, struct supplemental_page_table_entry, elem);
