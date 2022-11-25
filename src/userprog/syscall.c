@@ -171,9 +171,10 @@ syscall_init (void)
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
-/*
- * lib/user/syscall.c 의 함수가 SYS_WRITE와 같은 신호를 보내면 이 함수가 호출된다.
- */
+
+
+static bool is_valid_user_provided_pointer(void* user_pointer);
+
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
@@ -184,66 +185,66 @@ syscall_handler (struct intr_frame *f UNUSED)
       halt();
       break;
     case SYS_EXIT:
-      if(is_kernel_vaddr(*(uint32_t *)(f->esp + 4))) //vaddr.h
+      if(!is_valid_user_provided_pointer((f->esp + 4)))
         exit(-1);
       exit(*(uint32_t *)(f->esp + 4));
       break;
     case SYS_EXEC:
-      if(is_kernel_vaddr((char*)*(uint32_t *)(f->esp + 4)))
+      if(!is_valid_user_provided_pointer((f->esp + 4)))
         exit(-1);
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_WAIT:
+      if(!is_valid_user_provided_pointer((f->esp + 4)))
+        exit(-1);
       f->eax = wait((pid_t)*(uint32_t*)(f->esp + 4));
       break;
-    
-
     case SYS_WRITE:
       //echo x를 하면 echo, x, \n 이렇게 3번의 SYS_WRITE interrupt가 오는듯 하다.
-      if(is_kernel_vaddr((int)*(uint32_t*)(f->esp + 4)) || is_kernel_vaddr((const void*)*(uint32_t*)(f->esp + 8))
-       || is_kernel_vaddr((unsigned)*((uint32_t*)(f->esp + 12))))
+      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
+       || !is_valid_user_provided_pointer((f->esp + 12)))
         exit(-1);
       f->eax = write((int)*(uint32_t*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8), (unsigned)*((uint32_t*)(f->esp + 12)));
       break;
     case SYS_READ:
-      if(is_kernel_vaddr((int)*(uint32_t*)(f->esp + 4)) || is_kernel_vaddr((int)*(uint32_t*)(f->esp + 8))
-       || is_kernel_vaddr((int)*(uint32_t*)(f->esp + 12))){
+      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
+       || !is_valid_user_provided_pointer((f->esp + 12))){
         exit(-1);
       }
       f->eax = read((int)*(uint32_t*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), (unsigned)*((uint32_t*)(f->esp + 12)));
       break;
     case SYS_OPEN:
-      if(is_kernel_vaddr((const char*)*(uint32_t *)(f->esp + 4)))
+      if(!is_valid_user_provided_pointer(f->esp + 4))
         exit(-1);
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_CLOSE:
-      if(is_kernel_vaddr((int)*(uint32_t *)(f->esp + 4)))
+      if(!is_valid_user_provided_pointer(f->esp + 4))
         exit(-1);
       close((int)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_CREATE:
-      if(is_kernel_vaddr((const char *)*(uint32_t *)(f->esp + 4)) || is_kernel_vaddr((unsigned)*(uint32_t *)(f->esp + 8)))
+      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8)))
         exit(-1);
       f->eax = create((const char *)*(uint32_t *)(f->esp + 4), (unsigned)*(uint32_t *)(f->esp + 8));
       break;
     case SYS_REMOVE:
-      if(is_kernel_vaddr((const char*)*(uint32_t *)(f->esp + 4)))
+      if(!is_valid_user_provided_pointer(f->esp + 4))
         exit(-1);
       f->eax = remove((const char*)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_FILESIZE:
-			if(is_kernel_vaddr((int)*(uint32_t*)(f->esp + 4)))
+			if(!is_valid_user_provided_pointer(f->esp + 4))
         exit(-1);
 			f->eax = filesize((int)*(uint32_t*)(f->esp+4));
 			break;
 		case SYS_SEEK:
-			if(is_kernel_vaddr((int)*(uint32_t*)(f->esp + 4)) ||is_kernel_vaddr((unsigned)*(uint32_t*)(f->esp + 8)))
+			if(!is_valid_user_provided_pointer(f->esp + 4) ||!is_valid_user_provided_pointer(f->esp + 8))
         exit(-1);
 			seek((int)*(uint32_t*)(f->esp+4), (unsigned)*(uint32_t*)(f->esp+8));
 			break;
 		case SYS_TELL:
-			if(is_kernel_vaddr((int)*(uint32_t*)(f->esp + 4)))
+			if(!is_valid_user_provided_pointer(f->esp + 4))
         exit(-1);
 			f->eax = tell((int)*(uint32_t*)(f->esp+4));
 			break;
@@ -255,6 +256,20 @@ syscall_handler (struct intr_frame *f UNUSED)
 			  (int)*(uint32_t*)(f->esp+12), (int)*(uint32_t*)(f->esp+16));
       break;
   }
+}
 
-  //thread_exit ();
+/* proj4) exception.c:page_fault()를 위해 추가한다.
+   page_fault() 주석 참조. */
+static bool is_valid_user_provided_pointer(void* user_pointer){
+  /* null pointer check, kernel space(above PHYS_BASE) check */
+  if(user_pointer == NULL || is_kernel_vaddr(user_pointer)){
+    return false;
+  }
+
+  /* 2. unmapped virtual memory check
+     spt에서 유효하지 않으면 unmapped virtual memory */
+  struct thread* t = thread_current();
+  /* implement later */
+  
+  return true;
 }
