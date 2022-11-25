@@ -38,5 +38,6 @@ struct supplemental_page_table_entry{
 
 void vm_spt_create(struct hash*);
 bool vm_spt_set_IN_FRAME_page(struct hash* , void* , void* );
+struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
 
 #endif /* vm/page.h */

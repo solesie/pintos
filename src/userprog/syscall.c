@@ -191,7 +191,8 @@ syscall_handler (struct intr_frame *f UNUSED)
       exit(*(uint32_t *)(f->esp + 4));
       break;
     case SYS_EXEC:
-      if(!is_valid_user_provided_pointer((f->esp + 4)))
+      if(!is_valid_user_provided_pointer((f->esp + 4))
+       || !is_valid_user_provided_pointer((char*)*(uint32_t *)(f->esp + 4)))
         exit(-1);
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
       break;
@@ -207,7 +208,8 @@ syscall_handler (struct intr_frame *f UNUSED)
        //buf를 저장한 user stack pointer 뿐만 아니라 buf가 가르키는 값 또한 유효해야한다.
        || !is_valid_user_provided_pointer((void*)*(uint32_t*)(f->esp+8) + (unsigned)*(uint32_t*)(f->esp + 12)))
         exit(-1);
-      f->eax = write((int)*(uint32_t*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8), (unsigned)*((uint32_t*)(f->esp + 12)));
+      f->eax = write((int)*(uint32_t*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8),
+                       (unsigned)*((uint32_t*)(f->esp + 12)));
       break;
     case SYS_READ:
       if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
@@ -217,7 +219,8 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = read((int)*(uint32_t*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), (unsigned)*(uint32_t*)(f->esp + 12));
       break;
     case SYS_OPEN:
-      if(!is_valid_user_provided_pointer(f->esp + 4))
+      if(!is_valid_user_provided_pointer(f->esp + 4)
+      || !is_valid_user_provided_pointer((const char*)*(uint32_t *)(f->esp + 4)))
         exit(-1);
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
@@ -227,12 +230,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       close((int)*(uint32_t *)(f->esp + 4));
       break;
     case SYS_CREATE:
-      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8)))
+      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
+       || !is_valid_user_provided_pointer((const char *)*(uint32_t *)(f->esp + 4)))
         exit(-1);
       f->eax = create((const char *)*(uint32_t *)(f->esp + 4), (unsigned)*(uint32_t *)(f->esp + 8));
       break;
     case SYS_REMOVE:
-      if(!is_valid_user_provided_pointer(f->esp + 4))
+      if(!is_valid_user_provided_pointer(f->esp + 4)
+      || !is_valid_user_provided_pointer((const char*)*(uint32_t *)(f->esp + 4)))
         exit(-1);
       f->eax = remove((const char*)*(uint32_t *)(f->esp + 4));
       break;
@@ -252,9 +257,14 @@ syscall_handler (struct intr_frame *f UNUSED)
 			f->eax = tell((int)*(uint32_t*)(f->esp+4));
 			break;
     case SYS_FIBO:
+      if(!is_valid_user_provided_pointer(f->esp + 4))
+        exit(-1);
       f->eax = fibonacci((int)*(uint32_t*)(f->esp+4));
       break;
     case SYS_MAX4INT:
+      if(!is_valid_user_provided_pointer(f->esp + 4) || !is_valid_user_provided_pointer(f->esp + 8)
+      || !is_valid_user_provided_pointer(f->esp + 12) || !is_valid_user_provided_pointer(f->esp + 16))
+        exit(-1);
       f->eax = max_of_four_int((int)*(uint32_t*)(f->esp+4), (int)*(uint32_t*)(f->esp+8),
 			  (int)*(uint32_t*)(f->esp+12), (int)*(uint32_t*)(f->esp+16));
       break;
@@ -268,10 +278,15 @@ static bool is_valid_user_provided_pointer(void* user_pointer){
   if(user_pointer == NULL || is_kernel_vaddr(user_pointer))
     return false;
 
-  /* 2. unmapped virtual memory check
-     spt에서 유효하지 않으면 unmapped virtual memory */
+#ifdef VM
+  /* unmapped virtual memory check
+     spt에서 유효하지 않으면 unmapped virtual memory. */
   struct thread* t = thread_current();
-  /* implement later */
   
+  void* user_page = pg_round_down(user_pointer);
+  if(vm_spt_lookup(&(t->spt), user_page) == NULL)
+    return false;
+#endif  
+
   return true;
 }

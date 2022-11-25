@@ -31,6 +31,17 @@ bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_vi
   return false;
 }
 
+/* spt에서 user_page를 key로 spte를 찾는다.
+   있으면 spte, 없다면 NULL 반환. */
+struct supplemental_page_table_entry* vm_spt_lookup(struct hash* spt, void* user_page){
+  struct supplemental_page_table_entry key;
+  key.user_page = user_page;
+  struct hash_elem* elem = hash_find(spt, &key.elem);
+  if(elem == NULL)
+    return NULL;
+  return hash_entry(elem, struct supplemental_page_table_entry, elem);
+}
+
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux UNUSED){
   struct supplemental_page_table_entry *spte = hash_entry(elem, struct supplemental_page_table_entry, elem);
   return hash_int( (int)spte->user_page );

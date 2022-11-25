@@ -126,7 +126,7 @@ kill (struct intr_frame *f)
    kernel stack을 가르킨다. 그리고 intr_frame 형태로 기존 user pool에서의 
    register 정보들을 %esp부터 저장한다. 즉, CPU는 user->kernel모드로 전환될 때만 
    기존 user pool에서의 register 정보들을 (intr_frame 형태로) kernel stack에 저장한다. 
-   따라서 kernel에서 page fault가 발생했다면 intr_frame에 몇개의 값(esp, ebp)은 없다.*/
+   따라서 kernel에서 page fault가 발생했다면 intr_frame에 esp는 없다.*/
 static void
 page_fault (struct intr_frame *f) 
 {
@@ -173,7 +173,14 @@ page_fault (struct intr_frame *f)
      결국 user pool의 esp를 추적할 수 없게된다.
 
      어려우므로 그냥 1번 방법을 택한다. */
-  if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+     
+  if(user == false || is_kernel_vaddr(fault_addr)){
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+    PANIC("kernel page fault - 아마도 kernel bug 일것");
     exit(-1);
   }
 
