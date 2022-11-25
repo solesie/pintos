@@ -119,7 +119,14 @@ kill (struct intr_frame *f)
    example code here shows how to parse that information.  You
    can find more information about both of these in the
    description of "Interrupt 14--Page Fault Exception (#PF)" in
-   [IA32-v3a] section 5.15 "Exception and Interrupt Reference". */
+   [IA32-v3a] section 5.15 "Exception and Interrupt Reference".
+   
+
+   4.3.3) %esp는 user pool을 가르키다가, interrupt가 발생하면 %esp는 kernel pool의 
+   kernel stack을 가르킨다. 그리고 intr_frame 형태로 기존 user pool에서의 
+   register 정보들을 %esp부터 저장한다. 즉, CPU는 user->kernel모드로 전환될 때만 
+   기존 user pool에서의 register 정보들을 (intr_frame 형태로) kernel stack에 저장한다. 
+   따라서 kernel에서 page fault가 발생했다면 intr_frame에 몇개의 값(esp, ebp)은 없다.*/
 static void
 page_fault (struct intr_frame *f) 
 {
@@ -149,8 +156,25 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  if(user == false || is_kernel_vaddr(fault_addr) || not_present){ //현재 메모리가 커널 영역인 경우
-   exit(-1);
+  /* 3.1.5) system call에서 kernel은 user program이 넘겨준 포인터로 
+     메모리에 엑세스 해야한다. kernel은 이때 매우 신중해야한다. 왜냐하면 user가
+
+     1. null pointer를 넘길 수도 있고
+     2. unmapped된 virtual memory에 접근하는 pointer를 넘길 수도 있고
+     3. kernel space(above PHYS_BASE)에 접근하는 pointer를 넘길 수도 있다.
+
+     이를 해결하기 위해 
+
+     1. user pointer의 유효성을 검증한 후 user pointer로 메모리에 엑세스 하는 방법과
+     2. 3번만 확인한 후 user pointer로 메모리에 엑세스 하는 방법이 있다.
+
+     2번 방법을 선택할 경우 여기 page_fault()에서 invalid user pointer를 검증해야한다.
+     그러나 이는 user->kernel mode로 바뀌고 kernel이 page fault를 발생시킨다.
+     결국 user pool의 esp를 추적할 수 없게된다.
+
+     어려우므로 그냥 1번 방법을 택한다. */
+  if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+    exit(-1);
   }
 
   /* To implement virtual memory, delete the rest of the function
