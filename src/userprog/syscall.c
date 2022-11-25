@@ -10,6 +10,7 @@
 #include "threads/synch.h"
 #include "filesys/inode.h"
 
+#include "vm/page.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -202,16 +203,18 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_WRITE:
       //echo x를 하면 echo, x, \n 이렇게 3번의 SYS_WRITE interrupt가 오는듯 하다.
       if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
-       || !is_valid_user_provided_pointer((f->esp + 12)))
+       || !is_valid_user_provided_pointer((f->esp + 12)) 
+       //buf를 저장한 user stack pointer 뿐만 아니라 buf가 가르키는 값 또한 유효해야한다.
+       || !is_valid_user_provided_pointer((void*)*(uint32_t*)(f->esp+8) + (unsigned)*(uint32_t*)(f->esp + 12)))
         exit(-1);
       f->eax = write((int)*(uint32_t*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8), (unsigned)*((uint32_t*)(f->esp + 12)));
       break;
     case SYS_READ:
       if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
-       || !is_valid_user_provided_pointer((f->esp + 12))){
+       || !is_valid_user_provided_pointer((f->esp + 12)) 
+       || !is_valid_user_provided_pointer((void*)*(uint32_t*)(f->esp+8) + (unsigned)*(uint32_t*)(f->esp + 12)))
         exit(-1);
-      }
-      f->eax = read((int)*(uint32_t*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), (unsigned)*((uint32_t*)(f->esp + 12)));
+      f->eax = read((int)*(uint32_t*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), (unsigned)*(uint32_t*)(f->esp + 12));
       break;
     case SYS_OPEN:
       if(!is_valid_user_provided_pointer(f->esp + 4))
@@ -262,9 +265,8 @@ syscall_handler (struct intr_frame *f UNUSED)
    page_fault() 주석 참조. */
 static bool is_valid_user_provided_pointer(void* user_pointer){
   /* null pointer check, kernel space(above PHYS_BASE) check */
-  if(user_pointer == NULL || is_kernel_vaddr(user_pointer)){
+  if(user_pointer == NULL || is_kernel_vaddr(user_pointer))
     return false;
-  }
 
   /* 2. unmapped virtual memory check
      spt에서 유효하지 않으면 unmapped virtual memory */
