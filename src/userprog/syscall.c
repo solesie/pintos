@@ -11,6 +11,7 @@
 #include "filesys/inode.h"
 
 #include "vm/page.h"
+#include "userprog/pagedir.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -64,9 +65,9 @@ int open(const char* file){
 
 void close(int fd){
   struct thread* cur_process = thread_current();
-  if(cur_process->fd[fd]==NULL)
+  if(fd < 0 || fd >= 128 || cur_process->fd[fd]==NULL)
 		exit(-1);
-
+  
 	file_close(cur_process->fd[fd]);
 	cur_process->fd[fd]=NULL;
 }
@@ -77,7 +78,7 @@ int read(int fd, void* buffer, unsigned size){
     for(i = 0; i < size; ++i)
         *(char*)(buffer + i) = input_getc();
   } 
-  else if(fd >= 3 && fd <=128){
+  else if(fd >= 3 && fd < 128){
     struct thread* cur_process = thread_current ();
     struct file* f = cur_process->fd[fd];
     if(f == NULL) //이 프로세스에서는 f가 open 된 적이 없다.
@@ -97,7 +98,7 @@ int write (int fd, const void* buffer, unsigned size){
     putbuf(buffer, size);
     return size;
   }
-  else if(fd >= 3 && fd <=128){
+  else if(fd >= 3 && fd < 128){
     if (cur_process->fd[fd] == NULL) {
       exit(-1);
     }
@@ -174,119 +175,188 @@ syscall_init (void)
 }
 
 
-static bool is_valid_user_provided_pointer(void* user_pointer);
+static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
-  //printf ("system call! %d\n",*(int*)(f->esp));
-  //hex_dump(f->esp,f->esp,100,1);
+  /* user mode -> kernel mode 전환 시 CPU는 user_pool에서의 
+     레지스터 정보들을 intr_frame f에 저장한다(page_fault()주석 참조).
+     user mode에서 %esp의 정보를 지멋대로 바꿨을 수도 있다.
+     switch문에서 f->esp를 uint32_t*로 번역한다음 참조하므로 4bytes를 검사한다 */
+  if(!is_valid_user_provided_pointer(f->esp, 4)){
+    exit(-1);
+  }
+
   switch(*(uint32_t*)(f->esp)){
-    case SYS_HALT: 
+    case SYS_HALT: {
       halt();
       break;
-    case SYS_EXIT:
-      if(!is_valid_user_provided_pointer((f->esp + 4)))
+    }
+    case SYS_EXIT:{
+      //Before interpret f->esp + 4 as a pointer for int and read, check validation.
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
-      exit(*(uint32_t *)(f->esp + 4));
+      exit(*(int *)(f->esp + 4));
       break;
-    case SYS_EXEC:
-      if(!is_valid_user_provided_pointer((f->esp + 4))
-       || !is_valid_user_provided_pointer((char*)*(uint32_t *)(f->esp + 4)))
-        exit(-1);
+    }
+    case SYS_EXEC:{
+      //f->esp + 4에 저장되어있는 주소를 참조하여 cmd_line이 저장된 위치로 가야한다. 
+      //f->esp + 4를 참조하기 전에, 주소가 유효한지 확인한다(주소는 uint32_t와 호환된다).
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t)))
+          exit(-1);
+      //ok. 이제 f->esp + 4를 참조해서 cmd_line의 주소를 얻어도 된다.
+      //cmd_line은 모두 유효한 user pointer여야 한다.
+      char* start = (char*)*(uint32_t *)(f->esp + 4);
+      for(int i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+        if(start[i] == NULL)
+          break;
+      }
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
       break;
-    case SYS_WAIT:
-      if(!is_valid_user_provided_pointer((f->esp + 4)))
+    }
+    case SYS_WAIT:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(pid_t)))
         exit(-1);
-      f->eax = wait((pid_t)*(uint32_t*)(f->esp + 4));
+      f->eax = wait(*(pid_t*)(f->esp + 4));
       break;
-    case SYS_WRITE:
-      //echo x를 하면 echo, x, \n 이렇게 3번의 SYS_WRITE interrupt가 오는듯 하다.
-      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
-       || !is_valid_user_provided_pointer((f->esp + 12)) 
-       //buf를 저장한 user stack pointer 뿐만 아니라 buf가 가르키는 값 또한 유효해야한다.
-       || !is_valid_user_provided_pointer((void*)*(uint32_t*)(f->esp+8) + (unsigned)*(uint32_t*)(f->esp + 12)))
+    }
+    case SYS_WRITE:{
+      //f->esp + x를 참조해도 되는지 확인
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(uint32_t))
+       || !is_valid_user_provided_pointer(f->esp + 12, sizeof(unsigned)))
         exit(-1);
-      f->eax = write((int)*(uint32_t*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8),
-                       (unsigned)*((uint32_t*)(f->esp + 12)));
+      //쓸려는 buf 공간 또한 유효해야한다.
+      const uint8_t* start = (const uint8_t*)*(uint32_t *)(f->esp + 8);
+      for(int i = 0; i < *(unsigned*)(f->esp + 12); ++i){
+        if(!is_valid_user_provided_pointer(start + i, 1))
+          exit(-1);
+      }
+      f->eax = write(*(int*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8),
+                       *(unsigned*)(f->esp + 12));
       break;
-    case SYS_READ:
-      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
-       || !is_valid_user_provided_pointer((f->esp + 12)) 
-       || !is_valid_user_provided_pointer((void*)*(uint32_t*)(f->esp+8) + (unsigned)*(uint32_t*)(f->esp + 12)))
+    }
+    case SYS_READ:{
+      //same as SYS_WRITE
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(uint32_t))
+       || !is_valid_user_provided_pointer(f->esp + 12, sizeof(unsigned)))
         exit(-1);
-      f->eax = read((int)*(uint32_t*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), (unsigned)*(uint32_t*)(f->esp + 12));
+      uint8_t* start = (uint8_t*)*(uint32_t *)(f->esp + 8);
+      for(int i = 0; i < *(unsigned*)(f->esp + 12); ++i){
+        if(!is_valid_user_provided_pointer(start + i, 1))
+          exit(-1);
+      }
+      f->eax = read(*(int*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), *(unsigned*)(f->esp + 12));
       break;
-    case SYS_OPEN:
-      if(!is_valid_user_provided_pointer(f->esp + 4)
-      || !is_valid_user_provided_pointer((const char*)*(uint32_t *)(f->esp + 4)))
+    }
+    case SYS_OPEN:{
+      //same as SYS_EXEC
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
         exit(-1);
+      const char* start = (const char*)*(uint32_t *)(f->esp + 4);
+      for(int i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+        if(start[i] == NULL)
+          break;
+      }
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
-    case SYS_CLOSE:
-      if(!is_valid_user_provided_pointer(f->esp + 4))
+    }
+    case SYS_CLOSE:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
-      close((int)*(uint32_t *)(f->esp + 4));
+      close(*(int *)(f->esp + 4));
       break;
-    case SYS_CREATE:
-      if(!is_valid_user_provided_pointer((f->esp + 4)) || !is_valid_user_provided_pointer((f->esp + 8))
-       || !is_valid_user_provided_pointer((const char *)*(uint32_t *)(f->esp + 4)))
+    }
+    case SYS_CREATE:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(unsigned)))
         exit(-1);
-      f->eax = create((const char *)*(uint32_t *)(f->esp + 4), (unsigned)*(uint32_t *)(f->esp + 8));
+      const char* start = (const char*)*(uint32_t *)(f->esp + 4);
+      for(int i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+        if(start[i] == NULL)
+          break;
+      }
+      f->eax = create((const char *)*(uint32_t *)(f->esp + 4), *(unsigned *)(f->esp + 8));
       break;
-    case SYS_REMOVE:
-      if(!is_valid_user_provided_pointer(f->esp + 4)
-      || !is_valid_user_provided_pointer((const char*)*(uint32_t *)(f->esp + 4)))
+    }
+    case SYS_REMOVE:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
         exit(-1);
-      f->eax = remove((const char*)*(uint32_t *)(f->esp + 4));
+      const char* start = (const char*)*(uint32_t *)(f->esp + 4);
+      for(int i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+        if(start[i] == NULL)
+          break;
+      }
+      f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
-    case SYS_FILESIZE:
-			if(!is_valid_user_provided_pointer(f->esp + 4))
+    }
+    case SYS_FILESIZE:{
+			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
-			f->eax = filesize((int)*(uint32_t*)(f->esp+4));
+			f->eax = filesize(*(int*)(f->esp+4));
 			break;
-		case SYS_SEEK:
-			if(!is_valid_user_provided_pointer(f->esp + 4) ||!is_valid_user_provided_pointer(f->esp + 8))
+    }
+		case SYS_SEEK:{
+			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int))
+       ||!is_valid_user_provided_pointer(f->esp + 8, sizeof(unsigned)))
         exit(-1);
-			seek((int)*(uint32_t*)(f->esp+4), (unsigned)*(uint32_t*)(f->esp+8));
+			seek(*(int*)(f->esp+4), *(unsigned*)(f->esp+8));
 			break;
-		case SYS_TELL:
-			if(!is_valid_user_provided_pointer(f->esp + 4))
+    }
+		case SYS_TELL:{
+			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
-			f->eax = tell((int)*(uint32_t*)(f->esp+4));
+			f->eax = tell(*(int*)(f->esp+4));
 			break;
-    case SYS_FIBO:
-      if(!is_valid_user_provided_pointer(f->esp + 4))
+    }
+    case SYS_FIBO:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
-      f->eax = fibonacci((int)*(uint32_t*)(f->esp+4));
+      f->eax = fibonacci(*(int*)(f->esp+4));
       break;
-    case SYS_MAX4INT:
-      if(!is_valid_user_provided_pointer(f->esp + 4) || !is_valid_user_provided_pointer(f->esp + 8)
-      || !is_valid_user_provided_pointer(f->esp + 12) || !is_valid_user_provided_pointer(f->esp + 16))
+    }
+    case SYS_MAX4INT:{
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(int))
+       || !is_valid_user_provided_pointer(f->esp + 12, sizeof(int))
+       || !is_valid_user_provided_pointer(f->esp + 16, sizeof(int)))
         exit(-1);
-      f->eax = max_of_four_int((int)*(uint32_t*)(f->esp+4), (int)*(uint32_t*)(f->esp+8),
-			  (int)*(uint32_t*)(f->esp+12), (int)*(uint32_t*)(f->esp+16));
+      f->eax = max_of_four_int(*(int*)(f->esp+4), *(int*)(f->esp+8),
+			  *(int*)(f->esp+12), *(int*)(f->esp+16));
       break;
+    }
   }
 }
 
-/* proj4) exception.c:page_fault()를 위해 추가한다.
+/* user_pointer_inclusive부터 bytes만큼 유효한지 확인한다.
+   proj4) exception.c:page_fault()를 위해 추가한다.
    page_fault() 주석 참조. */
-static bool is_valid_user_provided_pointer(void* user_pointer){
-  /* null pointer check, kernel space(above PHYS_BASE) check */
-  if(user_pointer == NULL || is_kernel_vaddr(user_pointer))
-    return false;
-
-#ifdef VM
-  /* unmapped virtual memory check
-     spt에서 유효하지 않으면 unmapped virtual memory. */
+static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes){
   struct thread* t = thread_current();
-  
-  void* user_page = pg_round_down(user_pointer);
-  if(vm_spt_lookup(&(t->spt), user_page) == NULL)
-    return false;
-#endif  
+  for(size_t i = 0; i < bytes; ++i){
+    /* null pointer check, kernel space(above PHYS_BASE) check. */
+    if(user_pointer_inclusive + i == NULL || is_kernel_vaddr(user_pointer_inclusive + i))
+      return false;
 
+    /* unmapped virtual memory check. */
+    void* user_page = pg_round_down(user_pointer_inclusive + i);
+#ifdef VM
+    if(vm_spt_lookup(&(t->spt), user_page) == NULL)
+      return false;
+#else
+    if(pagedir_get_page (t->pagedir, user_page) == NULL)
+      return false;
+#endif
+  }
   return true;
 }

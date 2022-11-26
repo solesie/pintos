@@ -6,6 +6,8 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#include "syscall.h"
+
 /* Number of page faults processed. */
 static long long page_fault_cnt;
 
@@ -173,8 +175,11 @@ page_fault (struct intr_frame *f)
      결국 user pool의 esp를 추적할 수 없게된다.
 
      어려우므로 그냥 1번 방법을 택한다. */
-     
-  if(user == false || is_kernel_vaddr(fault_addr)){
+
+  /* user == false, 즉 kernel에 의해서 page fault된 경우를 디버깅해야한다.
+     f->esp로 사용자를 추적할 수가 없기 때문이다.
+     syscall 수정 후 pt-write-code-2 유일(implement later) */
+  if(user == false){
     printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
