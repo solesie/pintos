@@ -1,6 +1,9 @@
 #include <hash.h>
 #include "vm/page.h"
 #include "threads/vaddr.h"
+#include "threads/palloc.h"
+#include "vm/frame.h"
+#include "userprog/pagedir.h"
 
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux);
 static bool spte_less_func(const struct hash_elem *, const struct hash_elem *, void *aux);
@@ -41,6 +44,49 @@ struct supplemental_page_table_entry* vm_spt_lookup(struct hash* spt, void* user
   if(elem == NULL)
     return NULL;
   return hash_entry(elem, struct supplemental_page_table_entry, elem);
+}
+
+/* user_page를 physical memory상에 돌려두고 성공 여부를 반환한다. */
+bool vm_reload_user_page_to_user_pool(struct hash* spt, uint32_t* pagedir, void* user_page){
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
+  if(spte == NULL){
+    PANIC("user page 유효성 검증 필요");
+    return false;
+  }
+
+  void *kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, user_page);
+  if(kernel_virtual_page_in_user_pool == NULL){
+    PANIC("frame allocate 에러");
+    return false;
+  }
+
+  //Fetch the data into the frame
+  switch (spte->frame_data_clue){
+    case SWAP:
+      /* implement later */
+      break;
+
+    case ZEROING:
+      memset (kernel_virtual_page_in_user_pool, 0, PGSIZE);
+      break;
+
+    case IN_FRAME:
+      break;
+  }
+
+  //4. Point the page table entry for the faulting virtual address to the physical page.
+  if(!pagedir_set_page (pagedir, user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
+    PANIC("unacceptable 에러: synchronize, stack growth 문제 가능성...");
+    vm_frame_free(kernel_virtual_page_in_user_pool);
+    return false;
+  }
+
+  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+  spte->frame_data_clue = IN_FRAME;
+
+  pagedir_set_dirty (pagedir, kernel_virtual_page_in_user_pool, false);
+
+  return true;
 }
 
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux UNUSED){

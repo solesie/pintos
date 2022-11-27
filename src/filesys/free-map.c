@@ -5,7 +5,10 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 
-static struct file *free_map_file;   /* Free map file. */
+/* Free map file. '-f'옵션을 주지 안았을 때,
+   free_map_file로 부터 free_map을 읽어오기 위해 사용한다. */
+static struct file *free_map_file;
+
 static struct bitmap *free_map;      /* Free map, one bit per sector. */
 
 /* bitmap 조작만은 무조건 lock이 걸려져야 한다. */

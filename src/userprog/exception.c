@@ -6,7 +6,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-#include "syscall.h"
+#include "userprog/syscall.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -177,8 +177,7 @@ page_fault (struct intr_frame *f)
      어려우므로 그냥 1번 방법을 택한다. */
 
   /* user == false, 즉 kernel에 의해서 page fault된 경우를 디버깅해야한다.
-     f->esp로 사용자를 추적할 수가 없기 때문이다.
-     syscall 수정 후 pt-write-code-2 유일(implement later) */
+     1번방법을 택했고 syscall에서 전부 다 처리했기 때문이다. */
   if(user == false){
     printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
@@ -189,14 +188,48 @@ page_fault (struct intr_frame *f)
     exit(-1);
   }
 
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
+  struct thread* t = thread_current();
+  void* faulted_user_page = pg_round_down(fault_addr);
+
+  /* 4.1.4) 1. If the supplemental page table indicates that the user process
+     should not expect any data at the address it was trying to access,
+     or if the page lies within kernel virtual memory, 
+     or if the access is an attempt to write to a read-only page, 
+     then the access is invalid. Any invalid access terminates the process
+     and thereby frees all of its resources. */
+  if(vm_spt_lookup(&t->spt, faulted_user_page) || is_kernel_vaddr(faulted_user_page) 
+     || (!not_present && write)){
+    exit(-1);
+  }
+
+  /* 4.1.4) 2, 3, 4 */
+  if(!vm_reload_user_page_to_user_pool(&t->spt, t->pagedir, faulted_user_page)){
+    exit(-1);
+  }
+
+  /* proj4 pptx) invalid 참조한 경우 중, Growable region? */
+  
+  /* page fault 핸들링 완료. 정상적으로 종료. */
+  // printf ("Unhandled Page fault at %p: %s error %s page in %s context.\n",
+  //         fault_addr,
+  //         not_present ? "not present" : "rights violation",
+  //         write ? "writing" : "reading",
+  //         user ? "user" : "kernel");
+  return;
+
+// #else
+//   if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+//     exit(-1);
+//   }
+//   /* To implement virtual memory, delete the rest of the function
+//      body, and replace it with code that brings in the page to
+//      which fault_addr refers. */
+//   printf ("Page fault at %p: %s error %s page in %s context.\n",
+//           fault_addr,
+//           not_present ? "not present" : "rights violation",
+//           write ? "writing" : "reading",
+//           user ? "user" : "kernel");
+//   kill (f);
+// #endif
 }
 
