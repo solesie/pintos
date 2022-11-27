@@ -624,7 +624,7 @@ install_page (void *upage, void *kpage, bool writable)
 
 #ifdef VM
   if(ret)
-    ret = ret && vm_spt_set_IN_FRAME_page(&t->spt, upage, kpage);
+    ret = ret && vm_spt_set_IN_FRAME_page(&t->spt, upage, kpage, writable);
 #endif
 
   return ret;

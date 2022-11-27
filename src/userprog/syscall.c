@@ -189,10 +189,12 @@ syscall_handler (struct intr_frame *f UNUSED)
   }
 
   switch(*(uint32_t*)(f->esp)){
+
     case SYS_HALT: {
       halt();
       break;
     }
+
     case SYS_EXIT:{
       //Before interpret f->esp + 4 as a pointer for int and read, check validation.
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
@@ -200,6 +202,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       exit(*(int *)(f->esp + 4));
       break;
     }
+
     case SYS_EXEC:{
       //f->esp + 4에 저장되어있는 주소를 참조하여 cmd_line이 저장된 위치로 가야한다. 
       //f->esp + 4를 참조하기 전에, 주소가 유효한지 확인한다(주소는 uint32_t와 호환된다).
@@ -217,12 +220,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
       break;
     }
+
     case SYS_WAIT:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(pid_t)))
         exit(-1);
       f->eax = wait(*(pid_t*)(f->esp + 4));
       break;
     }
+
     case SYS_WRITE:{
       //f->esp + x를 참조해도 되는지 확인
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
@@ -239,20 +244,26 @@ syscall_handler (struct intr_frame *f UNUSED)
                        *(unsigned*)(f->esp + 12));
       break;
     }
+
     case SYS_READ:{
-      //same as SYS_WRITE
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
        || !is_valid_user_provided_pointer(f->esp + 8, sizeof(uint32_t))
        || !is_valid_user_provided_pointer(f->esp + 12, sizeof(unsigned)))
         exit(-1);
+      //buffer가 유효한 공간인지도 확인한다.
+      struct thread* t = thread_current();
       uint8_t* start = (uint8_t*)*(uint32_t *)(f->esp + 8);
       for(int i = 0; i < *(unsigned*)(f->esp + 12); ++i){
         if(!is_valid_user_provided_pointer(start + i, 1))
+          exit(-1);
+        //buffer가 writable한지도 확인해야한다(pt-write-code-2 test 참조).
+        if(!vm_spt_lookup(&t->spt, pg_round_down(start + i))->writable)
           exit(-1);
       }
       f->eax = read(*(int*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), *(unsigned*)(f->esp + 12));
       break;
     }
+
     case SYS_OPEN:{
       //same as SYS_EXEC
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
@@ -267,12 +278,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
     }
+
     case SYS_CLOSE:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
       close(*(int *)(f->esp + 4));
       break;
     }
+
     case SYS_CREATE:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t)) 
        || !is_valid_user_provided_pointer(f->esp + 8, sizeof(unsigned)))
@@ -287,6 +300,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = create((const char *)*(uint32_t *)(f->esp + 4), *(unsigned *)(f->esp + 8));
       break;
     }
+
     case SYS_REMOVE:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
         exit(-1);
@@ -300,12 +314,14 @@ syscall_handler (struct intr_frame *f UNUSED)
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
       break;
     }
+
     case SYS_FILESIZE:{
 			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
 			f->eax = filesize(*(int*)(f->esp+4));
 			break;
     }
+
 		case SYS_SEEK:{
 			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int))
        ||!is_valid_user_provided_pointer(f->esp + 8, sizeof(unsigned)))
@@ -313,18 +329,21 @@ syscall_handler (struct intr_frame *f UNUSED)
 			seek(*(int*)(f->esp+4), *(unsigned*)(f->esp+8));
 			break;
     }
+
 		case SYS_TELL:{
 			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
 			f->eax = tell(*(int*)(f->esp+4));
 			break;
     }
+
     case SYS_FIBO:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
         exit(-1);
       f->eax = fibonacci(*(int*)(f->esp+4));
       break;
     }
+
     case SYS_MAX4INT:{
       if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
        || !is_valid_user_provided_pointer(f->esp + 8, sizeof(int))
@@ -336,6 +355,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       break;
     }
   }
+
 }
 
 /* user_pointer_inclusive부터 bytes만큼 유효한지 확인한다.

@@ -12,7 +12,7 @@ void vm_spt_create(struct hash* spt){
 /* spt에 user_page와 
    physical_memory 상에 존재하는 kernel_virtual_page_in_user_pool를 
    연관시킨 spte를 삽입한다. */
-bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool){
+bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool, bool writable){
   struct supplemental_page_table_entry* spte 
   = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
 
@@ -22,6 +22,7 @@ bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_vi
   spte->user_page = user_page;
   spte->frame_data_clue = IN_FRAME;
   spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+  spte->writable = writable;
 
   if (hash_insert (spt, &spte->elem) == NULL) {
     return true;

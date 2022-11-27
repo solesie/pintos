@@ -34,10 +34,12 @@ struct supplemental_page_table_entry{
     struct hash_elem elem;
 
     enum clue_of_frame_data frame_data_clue;         /* frame에 대체 어떤 내용이 있어야 하는지 어떻게 알 것인가? */
+
+    bool writable;                                   /* same as pte R/W bit */
 };
 
 void vm_spt_create(struct hash*);
-bool vm_spt_set_IN_FRAME_page(struct hash* , void* , void* );
+bool vm_spt_set_IN_FRAME_page(struct hash* , void* , void* , bool);
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
 
 #endif /* vm/page.h */
