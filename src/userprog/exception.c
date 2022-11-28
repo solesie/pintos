@@ -6,7 +6,10 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
-#include "userprog/syscall.h"
+#include "threads/palloc.h"
+#include "vm/frame.h"
+#include "userprog/pagedir.h"
+#include "process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -111,6 +114,30 @@ kill (struct intr_frame *f)
     }
 }
 
+/* swap device의 데이터를 spte->kernel_virtual_page_in_user_pool에 올려둔다.
+   성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
+static bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
+  ASSERT(spte->frame_data_clue == SWAP);
+  //Is there remaining?
+  void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, spte -> user_page);//Page replacement algorithm
+  if(kernel_virtual_page_in_user_pool == NULL){
+    PANIC("frame allocate 에러");
+    return false;
+  }
+
+  //Swap page into frame from disk
+  vm_swap_in(spte->swap_slot, kernel_virtual_page_in_user_pool);
+
+  //Modify page and swap manage tables
+  if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
+    PANIC("install_page 에러");
+    vm_frame_free(kernel_virtual_page_in_user_pool);
+    return false;
+  }
+  
+  return true;
+}
+
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -128,7 +155,7 @@ kill (struct intr_frame *f)
    kernel stack을 가르킨다. 그리고 intr_frame 형태로 기존 user pool에서의 
    register 정보들을 %esp부터 저장한다. 즉, CPU는 user->kernel모드로 전환될 때만 
    기존 user pool에서의 register 정보들을 (intr_frame 형태로) kernel stack에 저장한다. 
-   따라서 kernel에서 page fault가 발생했다면 intr_frame에 esp는 없다.*/
+   따라서 kernel에서 page fault가 발생했다면 intr_frame에 esp는 없다. */
 static void
 page_fault (struct intr_frame *f) 
 {
@@ -191,45 +218,18 @@ page_fault (struct intr_frame *f)
   struct thread* t = thread_current();
   void* faulted_user_page = pg_round_down(fault_addr);
 
-  /* 4.1.4) 1. If the supplemental page table indicates that the user process
-     should not expect any data at the address it was trying to access,
-     or if the page lies within kernel virtual memory, 
-     or if the access is an attempt to write to a read-only page, 
-     then the access is invalid. Any invalid access terminates the process
-     and thereby frees all of its resources. */
-  if(vm_spt_lookup(&t->spt, faulted_user_page) || is_kernel_vaddr(faulted_user_page) 
-     || (!not_present && write)){
-    exit(-1);
-  }
 
-  /* 4.1.4) 2, 3, 4 */
-  if(!vm_reload_user_page_to_user_pool(&t->spt, t->pagedir, faulted_user_page)){
-    exit(-1);
-  }
-
-  /* proj4 pptx) invalid 참조한 경우 중, Growable region? */
-  
-  /* page fault 핸들링 완료. 정상적으로 종료. */
-  // printf ("Unhandled Page fault at %p: %s error %s page in %s context.\n",
+  // if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+  //   exit(-1);
+  // }
+  // /* To implement virtual memory, delete the rest of the function
+  //    body, and replace it with code that brings in the page to
+  //    which fault_addr refers. */
+  // printf ("Page fault at %p: %s error %s page in %s context.\n",
   //         fault_addr,
   //         not_present ? "not present" : "rights violation",
   //         write ? "writing" : "reading",
   //         user ? "user" : "kernel");
-  return;
-
-// #else
-//   if(user == false || is_kernel_vaddr(fault_addr) || not_present){
-//     exit(-1);
-//   }
-//   /* To implement virtual memory, delete the rest of the function
-//      body, and replace it with code that brings in the page to
-//      which fault_addr refers. */
-//   printf ("Page fault at %p: %s error %s page in %s context.\n",
-//           fault_addr,
-//           not_present ? "not present" : "rights violation",
-//           write ? "writing" : "reading",
-//           user ? "user" : "kernel");
-//   kill (f);
-// #endif
+  // kill (f);
 }
 

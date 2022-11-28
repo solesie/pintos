@@ -466,8 +466,6 @@ void construct_stack(char* file_name, void** esp){
 
 /* load() helpers. */
 
-static bool install_page (void *upage, void *kpage, bool writable);
-
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
 static bool
@@ -559,8 +557,8 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
 
-      // 3. user page의 logical address로 page-directory -> page-table을 따라 찾아가면 나오는 pte에
-      //    kernel virtual page(frame)을 연관시킨다.
+      // 3. upage의 logical address로 page-directory -> page-table을 따라 찾아가면 나오는 pte에
+      //    kpage(frame)을 연관시킨다.
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
@@ -602,6 +600,30 @@ setup_stack (void **esp)
   return success;
 }
 
+/* spt에 user_page와 kernel_virtual_page_in_user_pool를 연관시킨 spte를 삽입한다.
+   이미 spt에 user_page가 존재하는 경우는 kernel_virtual_page_in_user_pool로 갱신한다. */
+static void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
+, bool writable){
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
+
+  if(spte != NULL){
+    spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+    spte->frame_data_clue = IN_FRAME;
+    spte->writable = writable;
+    return;
+  }
+
+  /* spt에 아예 존재하지 않는경우는 새로 설치한다. */
+  spte = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
+  spte->user_page = user_page;
+  spte->frame_data_clue = IN_FRAME;
+  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+  spte->writable = writable;
+
+  hash_insert (spt, &spte->elem);
+  return false;
+}
+
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
    If WRITABLE is true, the user process may modify the page;
@@ -611,8 +633,10 @@ setup_stack (void **esp)
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails.
-   @param kpage: page obtained from the user pool with palloc_get_page() */
-static bool
+   @param kpage: page obtained from the user pool with palloc_get_page()
+   
+   pagedir상에는 upage가 not present여야 한다. */
+bool
 install_page (void *upage, void *kpage, bool writable)
 {
   struct thread *t = thread_current ();
@@ -624,7 +648,7 @@ install_page (void *upage, void *kpage, bool writable)
 
 #ifdef VM
   if(ret)
-    ret = ret && vm_spt_set_IN_FRAME_page(&t->spt, upage, kpage, writable);
+    vm_spt_install_IN_FRAME_page(&t->spt, upage, kpage, writable);
 #endif
 
   return ret;

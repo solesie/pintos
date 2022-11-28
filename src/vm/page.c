@@ -12,29 +12,6 @@ void vm_spt_create(struct hash* spt){
     hash_init(spt, spte_hash_func, spte_less_func, NULL);
 }
 
-/* spt에 user_page와 
-   physical_memory 상에 존재하는 kernel_virtual_page_in_user_pool를 
-   연관시킨 spte를 삽입한다. */
-bool vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool, bool writable){
-  struct supplemental_page_table_entry* spte 
-  = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
-
-  if(spte == NULL)
-    return false;
-
-  spte->user_page = user_page;
-  spte->frame_data_clue = IN_FRAME;
-  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
-  spte->writable = writable;
-
-  if (hash_insert (spt, &spte->elem) == NULL) {
-    return true;
-  }
-  // 이미 spte가 존재하는 경우
-  free (spte);
-  return false;
-}
-
 /* spt에서 user_page를 key로 spte를 찾는다.
    있으면 spte, 없다면 NULL 반환. */
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash* spt, void* user_page){
@@ -44,49 +21,6 @@ struct supplemental_page_table_entry* vm_spt_lookup(struct hash* spt, void* user
   if(elem == NULL)
     return NULL;
   return hash_entry(elem, struct supplemental_page_table_entry, elem);
-}
-
-/* user_page를 physical memory상에 돌려두고 성공 여부를 반환한다. */
-bool vm_reload_user_page_to_user_pool(struct hash* spt, uint32_t* pagedir, void* user_page){
-  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
-  if(spte == NULL){
-    PANIC("user page 유효성 검증 필요");
-    return false;
-  }
-
-  void *kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, user_page);
-  if(kernel_virtual_page_in_user_pool == NULL){
-    PANIC("frame allocate 에러");
-    return false;
-  }
-
-  //Fetch the data into the frame
-  switch (spte->frame_data_clue){
-    case SWAP:
-      /* implement later */
-      break;
-
-    case ZEROING:
-      memset (kernel_virtual_page_in_user_pool, 0, PGSIZE);
-      break;
-
-    case IN_FRAME:
-      break;
-  }
-
-  //4. Point the page table entry for the faulting virtual address to the physical page.
-  if(!pagedir_set_page (pagedir, user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
-    PANIC("unacceptable 에러: synchronize, stack growth 문제 가능성...");
-    vm_frame_free(kernel_virtual_page_in_user_pool);
-    return false;
-  }
-
-  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
-  spte->frame_data_clue = IN_FRAME;
-
-  pagedir_set_dirty (pagedir, kernel_virtual_page_in_user_pool, false);
-
-  return true;
 }
 
 static unsigned spte_hash_func(const struct hash_elem *elem, void *aux UNUSED){

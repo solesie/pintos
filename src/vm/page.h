@@ -7,8 +7,8 @@
 
 enum clue_of_frame_data{
     SWAP,           /* swap disk에 존재한다. */
-    ZEROING,        
     IN_FRAME        /* 현재 physical memory에 존재한다. */
+    //ZEROING         /* mmap에서 이용(구현 사항 없음) */
 };
 /* supplemental page table은 추가적인 정보로 page table을 보완한다.
    즉, page table을 나타내고, per process이다.
@@ -36,11 +36,11 @@ struct supplemental_page_table_entry{
     enum clue_of_frame_data frame_data_clue;         /* frame에 대체 어떤 내용이 있어야 하는지 어떻게 알 것인가? */
 
     bool writable;                                   /* same as pte R/W bit */
+
+    size_t swap_slot;                                /* frame이 swap_device에 존재하는 경우 어느 슬롯에 잇는가 */
 };
 
 void vm_spt_create(struct hash*);
-bool vm_spt_set_IN_FRAME_page(struct hash* , void* , void* , bool);
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
-bool vm_reload_user_page_to_user_pool(struct hash* , uint32_t*, void*);
 
 #endif /* vm/page.h */
