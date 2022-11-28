@@ -114,6 +114,7 @@ kill (struct intr_frame *f)
     }
 }
 
+#ifdef VM
 /* swap device의 데이터를 spte->kernel_virtual_page_in_user_pool에 올려둔다.
    성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
 static bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
@@ -138,6 +139,22 @@ static bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte
   return true;
 }
 
+static bool grow_user_stack(void* faulted_page){
+  void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, faulted_page);
+  if(kernel_virtual_page_in_user_pool == NULL){
+    PANIC("frame allocate 에러");
+    return false;
+  }
+
+  if(!install_page(faulted_page, kernel_virtual_page_in_user_pool, true)) {
+    PANIC("install_page 에러");
+    vm_frame_free(kernel_virtual_page_in_user_pool);
+    return false;
+  }
+  
+  return true;
+}
+#endif
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -184,7 +201,7 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
-
+#ifdef VM
   /* 3.1.5) system call에서 kernel은 user program이 넘겨준 포인터로 
      메모리에 엑세스 해야한다. kernel은 이때 매우 신중해야한다. 왜냐하면 user가
 
@@ -218,18 +235,72 @@ page_fault (struct intr_frame *f)
   struct thread* t = thread_current();
   void* faulted_user_page = pg_round_down(fault_addr);
 
+  /* Is valid reference ?
+     4.1.4) If the supplemental page table indicates that the user process
+     should not expect any data at the address it was trying to access,
+     or if the page lies within kernel virtual memory, 
+     or if the access is an attempt to write to a read-only page, 
+     then the access is invalid. Any invalid access terminates the process
+     and thereby frees all of its resources. */
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, faulted_user_page);
+  if(spte != NULL && !is_kernel_vaddr(faulted_user_page) && (not_present || !write)){
+    //Call handle_mm_fault
+    if(spte->frame_data_clue == SWAP && vm_load_SWAP_to_user_pool(spte)){
+      pagedir_set_dirty (t->pagedir, spte->kernel_virtual_page_in_user_pool, false);
+      //Restart process
+      return;
+    }
+    /* 이 상황 디버그 필요 */
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+  }
 
-  // if(user == false || is_kernel_vaddr(fault_addr) || not_present){
-  //   exit(-1);
-  // }
-  // /* To implement virtual memory, delete the rest of the function
-  //    body, and replace it with code that brings in the page to
-  //    which fault_addr refers. */
-  // printf ("Page fault at %p: %s error %s page in %s context.\n",
-  //         fault_addr,
-  //         not_present ? "not present" : "rights violation",
-  //         write ? "writing" : "reading",
-  //         user ? "user" : "kernel");
-  // kill (f);
+  /* No, then Growable region? 
+     4.3.3) The 80x86 PUSH instruction checks access permissions before
+     it adjusts the stack pointer, so it may cause a page fault 4 bytes 
+     below the stack pointer. Similarly, the PUSHA instruction pushes 32 bytes 
+     at once, so it can fault 32 bytes below the stack pointer.
+     You should impose some absolute limit on stack size, as do most OSes. 
+     Some OSes make the limit user-adjustable, e.g. with the ulimit command 
+     on many Unix systems. On many GNU/Linux systems, the default limit is 8 MB. */
+  void* user_esp = f->esp;
+  bool is_normal_exceed = fault_addr == user_esp;
+  bool is_push_instruction = fault_addr == user_esp - 4;
+  bool is_pusha_instruction = fault_addr == user_esp - 32;
+  bool is_in_limit_stack = PHYS_BASE - fault_addr <= 8*1024*1024;
+  printf("%p %p\n",fault_addr, user_esp);
+  if(is_in_limit_stack && (is_normal_exceed || is_push_instruction || is_pusha_instruction)){
+    //Expand Userstack
+    if(grow_user_stack(faulted_user_page)){
+      //Restart process
+      return;
+    }
+    /* 이 상황 디버그 필요 */
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+  }
+
+  /* No, then 죽임 */
+  exit(-1);
+#else
+  if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+    exit(-1);
+  }
+  /* To implement virtual memory, delete the rest of the function
+     body, and replace it with code that brings in the page to
+     which fault_addr refers. */
+  printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+  kill (f);
+#endif
 }
 
