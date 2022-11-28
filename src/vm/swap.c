@@ -39,6 +39,7 @@ void vm_swap_in(size_t swap_slot, void* kernel_virtual_page_in_user_pool){
      kernel_virtual_page_in_user_pool에다 기록한다.  */
   off_t bytes_read;
   block_sector_t sector_idx;
+
   for(bytes_read = 0, sector_idx = start; sector_idx < start + NUM_OF_SECTORS_ON_A_FRAME;
         ++sector_idx, bytes_read += BLOCK_SECTOR_SIZE){
     /* Read full one sector directly into kernel_virtual_page_in_user_pool. */
@@ -60,9 +61,10 @@ size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
   block_sector_t start = (block_sector_t)swap_slot * NUM_OF_SECTORS_ON_A_FRAME;
   off_t bytes_read;
   block_sector_t sector_idx;
+  
   for(bytes_read = 0, sector_idx = start; sector_idx < start + NUM_OF_SECTORS_ON_A_FRAME;
         ++sector_idx, bytes_read += BLOCK_SECTOR_SIZE){
-    /* Read full one sector directly into kernel_virtual_page_in_user_pool. */
+    /* Write full one sector directly into kernel_virtual_page_in_user_pool. */
     block_write (swap_device, sector_idx, kernel_virtual_page_in_user_pool + bytes_read);
   }
   return swap_slot;
