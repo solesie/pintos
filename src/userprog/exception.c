@@ -114,10 +114,9 @@ kill (struct intr_frame *f)
     }
 }
 
-#ifdef VM
 /* swap device의 데이터를 spte->kernel_virtual_page_in_user_pool에 올려둔다.
    성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
-static bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
+static bool load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
   ASSERT(spte->frame_data_clue == SWAP);
   //Is there remaining?
   void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, spte -> user_page);//Page replacement algorithm
@@ -154,7 +153,6 @@ static bool grow_user_stack(void* faulted_page){
   
   return true;
 }
-#endif
 /* Page fault handler.  This is a skeleton that must be filled in
    to implement virtual memory.  Some solutions to project 2 may
    also require modifying this code.
@@ -201,7 +199,7 @@ page_fault (struct intr_frame *f)
   not_present = (f->error_code & PF_P) == 0;
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
-#ifdef VM
+//#ifdef VM
   /* 3.1.5) system call에서 kernel은 user program이 넘겨준 포인터로 
      메모리에 엑세스 해야한다. kernel은 이때 매우 신중해야한다. 왜냐하면 user가
 
@@ -220,18 +218,6 @@ page_fault (struct intr_frame *f)
 
      어려우므로 그냥 1번 방법을 택한다. */
 
-  /* user == false, 즉 kernel에 의해서 page fault된 경우를 디버깅해야한다.
-     1번방법을 택했고 syscall에서 전부 다 처리했기 때문이다. */
-  if(user == false){
-    printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-    PANIC("kernel page fault - 아마도 kernel bug 일것");
-    exit(-1);
-  }
-
   struct thread* t = thread_current();
   void* faulted_user_page = pg_round_down(fault_addr);
 
@@ -245,7 +231,7 @@ page_fault (struct intr_frame *f)
   struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, faulted_user_page);
   if(spte != NULL && !is_kernel_vaddr(faulted_user_page) && (not_present || !write)){
     //Call handle_mm_fault
-    if(spte->frame_data_clue == SWAP && vm_load_SWAP_to_user_pool(spte)){
+    if(spte->frame_data_clue == SWAP && load_SWAP_to_user_pool(spte)){
       pagedir_set_dirty (t->pagedir, spte->kernel_virtual_page_in_user_pool, false);
       //Restart process
       return;
@@ -256,6 +242,19 @@ page_fault (struct intr_frame *f)
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
+  }
+
+  /* eviction을 구현하고 나서 1번 방법을 택해도 이 경우가 생길 수 있다.
+     system call에서 user pointer를 참조할 때 spt에는 SWAP으로 있는데
+     실제 메모리 상에는 없을 수 있다. */
+  if(user == false){
+    printf ("Page fault at %p: %s error %s page in %s context.\n",
+          fault_addr,
+          not_present ? "not present" : "rights violation",
+          write ? "writing" : "reading",
+          user ? "user" : "kernel");
+    PANIC("kernel page fault - 아마도 kernel bug 일것");
+    exit(-1);
   }
 
   /* No, then Growable region? 
@@ -271,7 +270,6 @@ page_fault (struct intr_frame *f)
   bool is_push_instruction = fault_addr == user_esp - 4;
   bool is_pusha_instruction = fault_addr == user_esp - 32;
   bool is_in_limit_stack = PHYS_BASE - fault_addr <= 8*1024*1024;
-  printf("%p %p\n",fault_addr, user_esp);
   if(is_in_limit_stack && (is_normal_exceed || is_push_instruction || is_pusha_instruction)){
     //Expand Userstack
     if(grow_user_stack(faulted_user_page)){
@@ -288,19 +286,19 @@ page_fault (struct intr_frame *f)
 
   /* No, then 죽임 */
   exit(-1);
-#else
-  if(user == false || is_kernel_vaddr(fault_addr) || not_present){
-    exit(-1);
-  }
-  /* To implement virtual memory, delete the rest of the function
-     body, and replace it with code that brings in the page to
-     which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
-          fault_addr,
-          not_present ? "not present" : "rights violation",
-          write ? "writing" : "reading",
-          user ? "user" : "kernel");
-  kill (f);
-#endif
+// #else
+//   if(user == false || is_kernel_vaddr(fault_addr) || not_present){
+//     exit(-1);
+//   }
+//   /* To implement virtual memory, delete the rest of the function
+//      body, and replace it with code that brings in the page to
+//      which fault_addr refers. */
+//   printf ("Page fault at %p: %s error %s page in %s context.\n",
+//           fault_addr,
+//           not_present ? "not present" : "rights violation",
+//           write ? "writing" : "reading",
+//           user ? "user" : "kernel");
+//   kill (f);
+// #endif
 }
 

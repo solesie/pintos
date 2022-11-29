@@ -3,6 +3,8 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/thread.h"
+#include "userprog/pagedir.h"
 
 /* frame table은 user page를 저장하고 있는 frame에 대한 정보를 저장한다.
    즉, 모든 프레임들을 저장하지 않고, per system이다.
@@ -67,23 +69,60 @@ void vm_frame_init(){
   hash_init(&frame_table, frame_table_hash_func, frame_table_less_func, NULL);
 }
 
-/**
- * user page를 위한 새로운 frame을 user pool에서 할당하고 frame table에 기록한다. 
- * 새로운 kernel virtual page의 주소(새로운 frame의 주소와 1:1 매핑)를 반환한다.
- * @param flags frame에 user_page를 할당할때 줄 옵션들
-*/
+/* random frame replacement algorithm */
+static uint32_t next = 1;
+static struct frame_table_entry* pick_frame_to_evict(void){
+  size_t n = hash_size(&frame_table);
+  next = next*1103515245 + 12345;
+  size_t pointer = next % n;
+
+  struct hash_iterator it; 
+  hash_first(&it, &frame_table);
+  size_t i; for(i=0; i<=pointer; ++i) hash_next(&it);
+
+  return hash_entry(hash_cur(&it), struct frame_table_entry, elem);
+}
+
+static void load_a_frame_to_swap_device(){
+  struct frame_table_entry* f_tobe_evicted = pick_frame_to_evict();
+
+  //f_evicted의 내용을 swap devide에 기록한다.
+  size_t swap_idx = vm_swap_out(f_tobe_evicted->kernel_virtual_page_in_user_pool);
+
+  //f_evicted의 정보와 일치하는 spte를 찾아서 갱신한다.
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(&f_tobe_evicted->t->spt, f_tobe_evicted->user_page);
+  ASSERT(spte != NULL);
+  spte->frame_data_clue = SWAP;
+  spte->kernel_virtual_page_in_user_pool = NULL;
+  spte->swap_slot = swap_idx;
+
+  //pagedir, frame table 에서 f_tobe_evicted의 정보를 없앤다.
+  pagedir_clear_page(f_tobe_evicted->t->pagedir, f_tobe_evicted->user_page);
+  vm_frame_free(f_tobe_evicted->kernel_virtual_page_in_user_pool);
+}
+
+/* user page를 위한 새로운 frame을 user pool에서 할당하고 frame table에 기록한다. 
+   새로운 kernel virtual page의 주소(새로운 frame의 주소와 1:1 매핑)를 반환한다.
+   
+   eviction을 구현한 후 이 함수를 사용하는 곳에서는 synchronize를 구현해야한다.(implement later)
+   
+   예를들어 일반적으로 f = vm_frame_allocte()를 한 다음 조건에 맞지 않다면 vm_free_allocate(f)를 호출한다.
+   p1이 f를 구해서 조건을 확인하는 중이라 하자.
+   p2가 f를 eviction한다면..?
+   
+   예를들어 p1, p2가 이 함수를 동시에 호출한다 하자.
+   p1이 palloc으로 빈프레임을 할당받는데 성공하고, p2는 실패한다고 하자.
+   p2가 방금 p1이 받은 프레임을 eviction한다면..?
+   
+   즉, palloc으로 받은 빈 프레임으로 사용을 완료할 때 까지는 절대로 eviction되면 안된다. */
 void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
-  lock_acquire (&frame_table_lock);
   void* kernel_virtual_page_in_user_pool = palloc_get_page (PAL_USER | flags);
-  if (kernel_virtual_page_in_user_pool == NULL) { //빈 frame이 존재하지 않는 경우
-    // swap 나중에 구현
-    return NULL;
+  if (kernel_virtual_page_in_user_pool == NULL) { 
+    load_a_frame_to_swap_device();
+    kernel_virtual_page_in_user_pool = palloc_get_page (PAL_USER | flags);
   }
 
-  struct frame_table_entry *fte = malloc(sizeof(struct frame_table_entry));
-  if(fte == NULL) {
-    return NULL;
-  }
+  struct frame_table_entry* fte = malloc(sizeof(struct frame_table_entry));
 
   fte->t = thread_current ();
   fte->user_page = user_page;
@@ -93,7 +132,6 @@ void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
 
   hash_insert (&frame_table, &fte->elem);
 
-  lock_release(&frame_table_lock);
   return kernel_virtual_page_in_user_pool;
 }
 
@@ -106,8 +144,7 @@ void vm_frame_free (void* kernel_virtual_page_in_user_pool){
   struct frame_table_entry temp;
   temp.kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
   struct hash_elem* e = hash_find(&frame_table, &(temp.elem));
-
-  ASSERT(e != NULL); // frame table에 존재해야만 없앨 수 있다.
+  ASSERT(e != NULL);
   struct frame_table_entry* fte = hash_entry(e, struct frame_table_entry, elem);
 
   hash_delete (&frame_table, &fte->elem);// frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
