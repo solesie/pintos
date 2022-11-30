@@ -4,6 +4,8 @@
 #include "vm/swap.h"
 #include "threads/synch.h"
 #include "filesys/off_t.h"
+#include "threads/palloc.h"
+#include "vm/page.h"
 
 /* 한 섹터의 크기는 512bytes, 한 페이지(프레임)의 크기는 4096bytes이다.
    8개의 연속된 섹터가 한 frame을 나타낸다.
@@ -20,7 +22,7 @@ static struct lock bitmap_lock;
 
 /* Initializes the swap system module. */
 void vm_swapsys_init(){
-  swap_device = block_get_role (BLOCK_FILESYS);
+  swap_device = block_get_role (BLOCK_SWAP);
   if (swap_device == NULL)
     PANIC ("No swap system device found, can't initialize swap system.");
 
@@ -32,7 +34,7 @@ void vm_swapsys_init(){
 }
 
 /* swap_device에서 swap_slot에 저장된 데이터를 kernel_virtual_page_in_user_pool에 복사한다.
-   read(swap_slot, kernel_virtual_page_int_user_pool, sizeof(PGSIZE)) 느낌 */
+   read(swap_slot, kernel_virtual_page_in_user_pool, sizeof(PGSIZE)) 느낌 */
 void vm_swap_in(size_t swap_slot, void* kernel_virtual_page_in_user_pool){
   block_sector_t start = (block_sector_t)swap_slot * NUM_OF_SECTORS_ON_A_FRAME;
   /* start부터 한 프레임 분량의 섹터(NUM_OF_SECTORS_ON_A_FRAME)를 읽어서 
@@ -68,4 +70,29 @@ size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
     block_write (swap_device, sector_idx, kernel_virtual_page_in_user_pool + bytes_read);
   }
   return swap_slot;
+}
+
+
+/* swap device의 데이터를 spte->kernel_virtual_page_in_user_pool에 올려둔다.
+   성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
+bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
+  ASSERT(spte->frame_data_clue == SWAP);
+  //Is there remaining?
+  void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, spte -> user_page);//Page replacement algorithm
+  if(kernel_virtual_page_in_user_pool == NULL){
+    PANIC("frame allocate 에러");
+    return false;
+  }
+
+  //Swap page into frame from disk
+  vm_swap_in(spte->swap_slot, kernel_virtual_page_in_user_pool);
+
+  //Modify page and swap manage tables
+  if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
+    PANIC("install_page 에러");
+    vm_frame_free(kernel_virtual_page_in_user_pool);
+    return false;
+  }
+  
+  return true;
 }
