@@ -127,7 +127,8 @@ static void vm_evict_a_frame_to_swap_device(){
   //pagedir 에서 f_tobe_evicted의 정보를 없앤다.
   pagedir_clear_page(f_tobe_evicted->t->pagedir, f_tobe_evicted->user_page);
 
-  vm_frame_free(f_tobe_evicted);
+  hash_delete (&frame_table, &f_tobe_evicted->elem);// frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
+  palloc_free_page(f_tobe_evicted->kernel_virtual_page_in_user_pool);
 }
 
 
@@ -171,30 +172,38 @@ static void vm_add_fte(void* kernel_virtual_page_in_user_pool, void* user_page){
    
    즉, palloc으로 받은 프레임으로 사용을 완료할 때 까지는 절대로 eviction되면 안된다. */
 void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
+  lock_acquire(&frame_table_lock);
   void* kernel_virtual_page_in_user_pool = vm_super_palloc_get_page(flags);
 
   vm_add_fte(kernel_virtual_page_in_user_pool, user_page);
+  lock_release(&frame_table_lock);
   return kernel_virtual_page_in_user_pool;
 }
 
 
 /* 인자로 받은 fte을 frame table에서 없애고 physical memory 상에서 free한다. */
 void vm_frame_free (struct frame_table_entry* fte){
+  lock_acquire(&frame_table_lock);
   hash_delete (&frame_table, &fte->elem);// frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
   palloc_free_page(fte->kernel_virtual_page_in_user_pool);
+  lock_release(&frame_table_lock);
 }
 
 
 /* user program이 종료될 때 pagedir_destory()가 호출되면서 실제 physical memory에서 free된다. 
    이때 frame_table에서는 따로 지워주어야한다. */
 void vm_frame_free_only_in_ft(struct frame_table_entry* fte){
+  lock_acquire(&frame_table_lock);
   hash_delete (&frame_table, &fte->elem);// frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
+  lock_release(&frame_table_lock);
 }
 
 
 /* setter */
 void vm_frame_set_for_user_pointer(struct frame_table_entry* fte, bool value){
+  lock_acquire(&frame_table_lock);
   fte->is_used_for_user_pointer = value;
+  lock_release(&frame_table_lock);
 }
 
 

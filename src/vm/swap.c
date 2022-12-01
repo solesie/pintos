@@ -78,5 +78,7 @@ size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
 void
 vm_swap_free (size_t swap_slot)
 {
+  lock_acquire(&bitmap_lock);
   bitmap_set(free_map, swap_slot, true);
+  lock_release(&bitmap_lock);
 }

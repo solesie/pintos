@@ -408,7 +408,7 @@ syscall_handler (struct intr_frame *f UNUSED)
         if(start[i] == NULL)
           break;
       }
-      f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
+      f->eax = remove((const char*)*(uint32_t *)(f->esp + 4));
 
       unmake(f->esp + 4, sizeof(uint32_t*));
       unmake(start, i);
@@ -427,7 +427,11 @@ syscall_handler (struct intr_frame *f UNUSED)
 			if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int))
        ||!is_valid_user_provided_pointer(f->esp + 8, sizeof(unsigned)))
         exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+      make_user_pointer_in_physical_memory(f->esp + 8, sizeof(unsigned));
 			seek(*(int*)(f->esp+4), *(unsigned*)(f->esp+8));
+      unmake(f->esp + 4, sizeof(int));
+      unmake(f->esp + 8, sizeof(unsigned));
 			break;
     }
 

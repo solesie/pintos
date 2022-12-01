@@ -6,6 +6,8 @@
 #include "filesys/inode.h"
 #include "threads/malloc.h"
 
+#include "threads/thread.h"
+
 /* A directory. */
 struct dir 
   {
@@ -160,10 +162,18 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  if (lookup (dir, name, &e, NULL, false))
+#ifdef USERPROG
+  lock_acquire(&(dir->inode->w));
+#endif
+
+  if (lookup (dir, name, &e, NULL, true))
     *inode = inode_open (e.inode_sector);
   else
     *inode = NULL;
+
+#ifdef USERPROG
+  lock_release(&(dir->inode->w));
+#endif
 
   return *inode != NULL;
 }
