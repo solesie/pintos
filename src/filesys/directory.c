@@ -121,6 +121,15 @@ lookup (const struct dir *dir, const char *name,
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
+#ifdef USERPROG
+        if(!in_writer){
+          lock_acquire(&(dir->inode->inode_readcnt_mutex));
+          --dir->inode->read_cnt;
+          if(dir->inode->read_cnt == 0)
+            lock_release(&(dir->inode->w));
+          lock_release(&(dir->inode->inode_readcnt_mutex));
+        }
+#endif
         return true;
       }
   }
