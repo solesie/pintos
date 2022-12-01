@@ -26,6 +26,7 @@
 #ifndef VM
 #define vm_frame_allocate(x, y) palloc_get_page(x)
 #define vm_frame_free(x) palloc_free_page(x)
+#define vm_frame_lookup(x) x
 #endif
 
 static thread_func start_process NO_RETURN;
@@ -160,6 +161,7 @@ process_exit (void)
   /* (PANIC 발생 시 예외) 이 스레드가 점유하고있는 global lock들을 해제해야한다. (implement later) */
 
   /* spt 메모리 해제 (implement later) */
+  vm_spt_destroy(&cur->spt);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -552,7 +554,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          vm_frame_free (kpage);
+          vm_frame_free (vm_frame_lookup(kpage));
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -562,7 +564,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          vm_frame_free (kpage);
+          vm_frame_free (vm_frame_lookup(kpage));
           return false; 
         }
 
@@ -595,7 +597,7 @@ setup_stack (void **esp)
       if (success)
         *esp = PHYS_BASE;
       else
-        vm_frame_free (kpage);
+        vm_frame_free (vm_frame_lookup(kpage));
     }
   return success;
 }
@@ -613,7 +615,8 @@ static void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void
     return;
   }
 
-  /* spt에 아예 존재하지 않는경우는 새로 설치한다. */
+  /* spt에 아예 존재하지 않는경우는 새로 설치한다.
+     새로운 spt는 오로지 여기서만 생긴다. */
   spte = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
   spte->user_page = user_page;
   spte->frame_data_clue = IN_FRAME;
@@ -633,9 +636,9 @@ static void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void
    with palloc_get_page().
    Returns true on success, false if UPAGE is already mapped or
    if memory allocation fails.
-   @param kpage: page obtained from the user pool with palloc_get_page()
-   
-   pagedir상에는 upage가 not present여야 한다. */
+   pagedir상에는 upage가 not present여야 한다.
+
+   @param kpage: page obtained from the user pool with palloc_get_page() */
 bool
 install_page (void *upage, void *kpage, bool writable)
 {
