@@ -7,6 +7,8 @@
 #include "threads/palloc.h"
 #include "vm/page.h"
 
+/* block_read(), block_write() wrapper and bitmap manipulation functions are defined in swap.c */
+
 /* 한 섹터의 크기는 512bytes, 한 페이지(프레임)의 크기는 4096bytes이다.
    8개의 연속된 섹터가 한 frame을 나타낸다.
    4.1.2) swap slots should be page-aligned because there is no downside in doing so. */
@@ -47,9 +49,10 @@ void vm_swap_in(size_t swap_slot, void* kernel_virtual_page_in_user_pool){
     /* Read full one sector directly into kernel_virtual_page_in_user_pool. */
     block_read (swap_device, sector_idx, kernel_virtual_page_in_user_pool + bytes_read);
   }
-
+  lock_acquire(&bitmap_lock);
   /* kernel space에 존재하므로 free_map->bits[swap_slot] available for use. */
   bitmap_set(free_map, swap_slot, false);
+  lock_release(&bitmap_lock);
 }
 
 /* kernel_virtual_page_in_user_pool를 swap_device에 기록한다.
@@ -72,27 +75,8 @@ size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
   return swap_slot;
 }
 
-
-/* swap device의 데이터를 spte->kernel_virtual_page_in_user_pool에 올려둔다.
-   성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
-bool vm_load_SWAP_to_user_pool(struct supplemental_page_table_entry* spte){
-  ASSERT(spte->frame_data_clue == SWAP);
-  //Is there remaining?
-  void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, spte -> user_page);//Page replacement algorithm
-  if(kernel_virtual_page_in_user_pool == NULL){
-    PANIC("frame allocate 에러");
-    return false;
-  }
-
-  //Swap page into frame from disk
-  vm_swap_in(spte->swap_slot, kernel_virtual_page_in_user_pool);
-
-  //Modify page and swap manage tables
-  if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
-    PANIC("install_page 에러");
-    vm_frame_free(kernel_virtual_page_in_user_pool);
-    return false;
-  }
-  
-  return true;
+void
+vm_swap_free (size_t swap_slot)
+{
+  bitmap_set(free_map, swap_slot, true);
 }

@@ -41,6 +41,9 @@ struct supplemental_page_table_entry{
 };
 
 void vm_spt_create(struct hash*);
+void vm_spt_destroy (struct hash* spt);
+
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
+void vm_spt_update_after_swap_out(struct supplemental_page_table_entry* spte, size_t swap_slot);
 
 #endif /* vm/page.h */
