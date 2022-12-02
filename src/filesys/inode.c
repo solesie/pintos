@@ -35,7 +35,8 @@ static struct list open_inodes;
 #ifdef USERPROG
 /* open_inodes list에 대해 reader-writer problem 적용 */
 int inodes_list_readcnt;
-struct lock inodes_list_w, inl_rc_mutex;
+struct lock inl_rc_mutex;
+struct semaphore inodes_list_w;
 #endif
 
 
@@ -48,7 +49,7 @@ inode_init (void)
 #ifdef USERPROG
   inodes_list_readcnt = 0;
   lock_init(&inl_rc_mutex);
-  lock_init(&inodes_list_w);
+  sema_init(&inodes_list_w, 1);
   int sector_num = block_size (fs_device);
   inode_lock = malloc(sizeof(struct lock*)*sector_num);
   for(int i = 0;i < sector_num; ++i){
@@ -126,7 +127,7 @@ inode_open (block_sector_t sector)
   lock_acquire(&inl_rc_mutex);
   ++inodes_list_readcnt;
   if(inodes_list_readcnt == 1)
-    lock_acquire(&inodes_list_w);
+    sema_up(&inodes_list_w);
   lock_release(&inl_rc_mutex);
 #endif
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
@@ -142,7 +143,7 @@ inode_open (block_sector_t sector)
           lock_acquire(&inl_rc_mutex);
           --inodes_list_readcnt;
           if(inodes_list_readcnt == 0)
-            lock_release(&inodes_list_w);
+            sema_down(&inodes_list_w);
           lock_release(&inl_rc_mutex);
 #endif
 
@@ -154,7 +155,7 @@ inode_open (block_sector_t sector)
   lock_acquire(&inl_rc_mutex);
   --inodes_list_readcnt;
   if(inodes_list_readcnt == 0)
-    lock_release(&inodes_list_w);
+    sema_down(&inodes_list_w);
   lock_release(&inl_rc_mutex);
 #endif
 
@@ -171,11 +172,11 @@ inode_open (block_sector_t sector)
 
   /* Initialize. */
 #ifdef USERPROG
-  lock_acquire(&inodes_list_w); //list_push 는 list에 writing 하는 상황이다.
+  sema_up(&inodes_list_w); //list_push 는 list에 writing 하는 상황이다.
 #endif
   list_push_front (&open_inodes, &inode->elem);
 #ifdef USERPROG
-  lock_release(&inodes_list_w);
+  sema_down(&inodes_list_w);
 #endif
   inode->sector = sector;
   inode->open_cnt = 1;
@@ -183,7 +184,7 @@ inode_open (block_sector_t sector)
 
 #ifdef USERPROG
   inode->read_cnt = 0;
-  lock_init(&(inode->w));
+  sema_init(&(inode->w), 1);
   lock_init(&(inode->inode_readcnt_mutex));
 #endif
 
@@ -240,9 +241,9 @@ inode_close (struct inode *inode)
     {
       /* Remove from inode list and release lock. inodes_list에 writing 하는 상황이다. */
 #ifdef USERPROG
-      lock_acquire(&inodes_list_w);
+      sema_up(&inodes_list_w);
       list_remove (&inode->elem);
-      lock_release(&inodes_list_w);
+      sema_down(&inodes_list_w);
 #endif
 
       /* Deallocate blocks if removed. */
@@ -403,9 +404,9 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
 void
 inode_deny_write (struct inode *inode) 
 {
-  lock_acquire(&inode->w);
+  sema_down(&inode->w);
   inode->deny_write_cnt++;
-  lock_release(&inode->w);
+  sema_up(&inode->w);
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
 }
 
@@ -417,9 +418,9 @@ inode_allow_write (struct inode *inode)
 {
   ASSERT (inode->deny_write_cnt > 0);
   ASSERT (inode->deny_write_cnt <= inode->open_cnt);
-  lock_acquire(&inode->w);
+  sema_down(&inode->w);
   inode->deny_write_cnt--;
-  lock_release(&inode->w);
+  sema_up(&inode->w);
 }
 
 /* Returns the length, in bytes, of INODE's data. 

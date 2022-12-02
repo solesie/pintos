@@ -34,7 +34,7 @@ struct inode
   
 #ifdef USERPROG                      
     int read_cnt;
-    struct lock w;
+    struct semaphore w;
     struct lock inode_readcnt_mutex;
 #endif
   };

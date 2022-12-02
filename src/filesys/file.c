@@ -68,7 +68,7 @@ file_read (struct file *file, void *buffer, off_t size)
   lock_acquire(&file->inode->inode_readcnt_mutex);
   ++file->inode->read_cnt;
   if(file->inode->read_cnt == 1){
-    lock_acquire(&file->inode->w);
+    sema_down(&file->inode->w);
   }
   lock_release(&file->inode->inode_readcnt_mutex);
 #endif
@@ -80,7 +80,7 @@ file_read (struct file *file, void *buffer, off_t size)
   lock_acquire(&file->inode->inode_readcnt_mutex);
   --file->inode->read_cnt;
   if(file->inode->read_cnt == 0){
-    lock_release(&file->inode->w);
+    sema_up(&file->inode->w);
   }
   lock_release(&file->inode->inode_readcnt_mutex);
 #endif
@@ -100,7 +100,7 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
   lock_acquire(&file->inode->inode_readcnt_mutex);
   ++file->inode->read_cnt;
   if(file->inode->read_cnt == 1){
-    lock_acquire(&file->inode->w);
+    sema_down(&file->inode->w);
   }
   lock_release(&file->inode->inode_readcnt_mutex);
 #endif
@@ -109,7 +109,7 @@ file_read_at (struct file *file, void *buffer, off_t size, off_t file_ofs)
   lock_acquire(&file->inode->inode_readcnt_mutex);
   --file->inode->read_cnt;
   if(file->inode->read_cnt == 0){
-    lock_release(&file->inode->w);
+    sema_up(&file->inode->w);
   }
   lock_release(&file->inode->inode_readcnt_mutex);
 #endif
@@ -127,12 +127,12 @@ off_t
 file_write (struct file *file, const void *buffer, off_t size) 
 {
 #ifdef USERPROG
-  lock_acquire(&file->inode->w);
+  sema_down(&file->inode->w);
 #endif
   off_t bytes_written = inode_write_at (file->inode, buffer, size, file->pos);
   file->pos += bytes_written;
 #ifdef USERPROG
-  lock_release(&file->inode->w);
+  sema_up(&file->inode->w);
 #endif
   return bytes_written;
 }
@@ -149,11 +149,11 @@ file_write_at (struct file *file, const void *buffer, off_t size,
                off_t file_ofs) 
 {
 #ifdef USERPROG
-  lock_acquire(&file->inode->w);
+  sema_down(&file->inode->w);
 #endif
   off_t ret = inode_write_at (file->inode, buffer, size, file_ofs);
 #ifdef USERPROG
-  lock_release(&file->inode->w);
+  sema_up(&file->inode->w);
 #endif
   return ret;
 }

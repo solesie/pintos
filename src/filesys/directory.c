@@ -96,18 +96,8 @@ dir_get_inode (struct dir *dir)
    otherwise, returns false and ignores EP and OFSP. */
 static bool
 lookup (const struct dir *dir, const char *name,
-        struct dir_entry *ep, off_t *ofsp, bool in_writer) 
+        struct dir_entry *ep, off_t *ofsp) 
 {
-#ifdef USERPROG
-  if(!in_writer){
-    lock_acquire(&(dir->inode->inode_readcnt_mutex));
-    ++dir->inode->read_cnt;
-    if(dir->inode->read_cnt == 1)
-      lock_acquire(&(dir->inode->w));
-    lock_release(&(dir->inode->inode_readcnt_mutex));
-  }
-#endif
-
   struct dir_entry e;
   size_t ofs;
   
@@ -123,28 +113,9 @@ lookup (const struct dir *dir, const char *name,
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
-#ifdef USERPROG
-        if(!in_writer){
-          lock_acquire(&(dir->inode->inode_readcnt_mutex));
-          --dir->inode->read_cnt;
-          if(dir->inode->read_cnt == 0)
-            lock_release(&(dir->inode->w));
-          lock_release(&(dir->inode->inode_readcnt_mutex));
-        }
-#endif
         return true;
       }
   }
-
-#ifdef USERPROG
-  if(!in_writer){
-    lock_acquire(&(dir->inode->inode_readcnt_mutex));
-    --dir->inode->read_cnt;
-    if(dir->inode->read_cnt == 0)
-      lock_release(&(dir->inode->w));
-    lock_release(&(dir->inode->inode_readcnt_mutex));
-  }
-#endif
 
   return false;
 }
@@ -163,16 +134,24 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (name != NULL);
 
 #ifdef USERPROG
-  lock_acquire(&(dir->inode->w));
+  lock_acquire(&(dir->inode->inode_readcnt_mutex));
+  ++dir->inode->read_cnt;
+  if(dir->inode->read_cnt == 1)
+    sema_down(&(dir->inode->w));
+  lock_release(&(dir->inode->inode_readcnt_mutex));
 #endif
 
-  if (lookup (dir, name, &e, NULL, true))
+  if (lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);
   else
     *inode = NULL;
 
 #ifdef USERPROG
-  lock_release(&(dir->inode->w));
+  lock_acquire(&(dir->inode->inode_readcnt_mutex));
+  --dir->inode->read_cnt;
+  if(dir->inode->read_cnt == 0)
+    sema_up(&(dir->inode->w));
+  lock_release(&(dir->inode->inode_readcnt_mutex));
 #endif
 
   return *inode != NULL;
@@ -201,11 +180,15 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   }
 
 #ifdef USERPROG
-  lock_acquire(&(dir->inode->w));
+  lock_acquire(&(dir->inode->inode_readcnt_mutex));
+  ++dir->inode->read_cnt;
+  if(dir->inode->read_cnt == 1)
+    sema_down(&(dir->inode->w));
+  lock_release(&(dir->inode->inode_readcnt_mutex));
 #endif
 
   /* Check that NAME is not in use. */
-  if (lookup (dir, name, NULL, NULL, true))
+  if (lookup (dir, name, NULL, NULL))
     goto done;
 
   /* Set OFS to offset of free slot.
@@ -220,6 +203,18 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
     if (!e.in_use)
       break;
 
+#ifdef USERPROG
+  lock_acquire(&(dir->inode->inode_readcnt_mutex));
+  --dir->inode->read_cnt;
+  if(dir->inode->read_cnt == 0)
+    sema_up(&(dir->inode->w));
+  lock_release(&(dir->inode->inode_readcnt_mutex));
+#endif
+
+#ifdef USERPROG
+  sema_down(&(dir->inode->w));
+#endif
+
   /* Write slot. */
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
@@ -229,7 +224,7 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
  done:
 
 #ifdef USERPROG
-  lock_release(&(dir->inode->w));
+  sema_up(&(dir->inode->w));
 #endif
   return success;
 }
@@ -250,11 +245,11 @@ dir_remove (struct dir *dir, const char *name)
   ASSERT (name != NULL);
 
 #ifdef USERPROG
-  lock_acquire(&(dir->inode->w));
+  sema_down(&(dir->inode->w));
 #endif
 
   /* Find directory entry. */
-  if (!lookup (dir, name, &e, &ofs, true))
+  if (!lookup (dir, name, &e, &ofs))
     goto done;
 
   /* Open inode. */
@@ -273,7 +268,7 @@ dir_remove (struct dir *dir, const char *name)
 
  done:
 #ifdef USERPROG
-  lock_release(&(dir->inode->w));
+  sema_up(&(dir->inode->w));
 #endif
   inode_close (inode);
   return success;
