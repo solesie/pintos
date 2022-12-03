@@ -25,8 +25,6 @@
 
 #ifndef VM
 #define vm_frame_allocate(x, y) palloc_get_page(x)
-#define vm_frame_free(x) palloc_free_page(x)
-#define vm_frame_lookup(x) x
 #endif
 
 static thread_func start_process NO_RETURN;
@@ -554,7 +552,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Load this page. */
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
-          vm_frame_free (vm_frame_lookup(kpage));
+#ifdef VM
+          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
+          vm_frame_free(founds);
+          vm_ft_same_keys_free(founds);
+#else
+          palloc_free_page(kpage);
+#endif
           return false; 
         }
       memset (kpage + page_read_bytes, 0, page_zero_bytes);
@@ -564,7 +568,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       /* Add the page to the process's address space. */
       if (!install_page (upage, kpage, writable)) 
         {
-          vm_frame_free (vm_frame_lookup(kpage));
+#ifdef VM
+          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
+          vm_frame_free(founds);
+          vm_ft_same_keys_free(founds);
+#else
+          palloc_free_page(kpage);
+#endif
           return false; 
         }
 
@@ -596,8 +606,15 @@ setup_stack (void **esp)
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
         *esp = PHYS_BASE;
-      else
-        vm_frame_free (vm_frame_lookup(kpage));
+      else{
+#ifdef VM
+          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
+          vm_frame_free(founds->pointers_arr_of_ft_hash_elem[0]);
+          vm_ft_same_keys_free(founds);
+#else
+          palloc_free_page(kpage);
+#endif
+      }
     }
   return success;
 }

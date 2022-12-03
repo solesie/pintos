@@ -173,11 +173,21 @@ int max_of_four_int(int a, int b, int c, int d){
   return max;
 }
 
+
+
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
+
+
+
+
+
+
+
+
 
 
 static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes);
@@ -229,13 +239,15 @@ syscall_handler (struct intr_frame *f UNUSED)
       char* start = (char*)*(uint32_t *)(f->esp + 4);
       struct thread* t = thread_current();
       int i;
-      for(i = 0; ; ++i){
+      for(i = 0; ;++i){
         if(!is_valid_user_provided_pointer(start+i, 1))
           exit(-1);
-  
-        make_user_pointer_in_physical_memory(start + i, 1);
-        if(start[i] == NULL)
+        if(i % PGSIZE == 0) //TIMEOUT...
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
           break;
+        }
       }
 
       f->eax = exec((char*)*(uint32_t *)(f->esp + 4));
@@ -275,9 +287,10 @@ syscall_handler (struct intr_frame *f UNUSED)
       for(i = 0; i < *(unsigned*)(f->esp + 12); ++i){
         if(!is_valid_user_provided_pointer(start + i, 1)) //쓸려는 buf 공간 또한 유효해야한다.
           exit(-1);
-
-        make_user_pointer_in_physical_memory(start +i, 1);
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
       }
+      make_user_pointer_in_physical_memory(start +i, 1);
 
       f->eax = write(*(int*)(f->esp + 4), (const void*)*(uint32_t*)(f->esp + 8),
                        *(unsigned*)(f->esp + 12));
@@ -312,8 +325,10 @@ syscall_handler (struct intr_frame *f UNUSED)
         if(!vm_spt_lookup(&t->spt, pg_round_down(start + i))->writable)
           exit(-1);
         
-        make_user_pointer_in_physical_memory(start + i, 1);
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
       }
+      make_user_pointer_in_physical_memory(start + i, 1);
 
       f->eax = read(*(int*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8), *(unsigned*)(f->esp + 12));
 
@@ -337,12 +352,13 @@ syscall_handler (struct intr_frame *f UNUSED)
         if(!is_valid_user_provided_pointer(start+i, 1))
           exit(-1);
           
-        make_user_pointer_in_physical_memory(start + i, 1);
-
-        if(start[i] == NULL)
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
           break;
+        }
       }
-
       f->eax = open((const char*)*(uint32_t *)(f->esp + 4));
 
       unmake(f->esp + 4, sizeof(uint32_t*));
@@ -376,12 +392,13 @@ syscall_handler (struct intr_frame *f UNUSED)
         if(!is_valid_user_provided_pointer(start+i, 1))
           exit(-1);
         
-        make_user_pointer_in_physical_memory(start + i, 1);
-
-        if(start[i] == NULL)
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
           break;
+        }
       }
-
       f->eax = create((const char *)*(uint32_t *)(f->esp + 4), *(unsigned *)(f->esp + 8));
 
       unmake(f->esp + 4, sizeof(uint32_t));
@@ -403,10 +420,12 @@ syscall_handler (struct intr_frame *f UNUSED)
         if(!is_valid_user_provided_pointer(start+i, 1))
           exit(-1);
 
-        make_user_pointer_in_physical_memory(start + i, 1);
-
-        if(start[i] == NULL)
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
           break;
+        }
       }
       f->eax = remove((const char*)*(uint32_t *)(f->esp + 4));
 
@@ -489,22 +508,48 @@ static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t 
 /* 4.3.5) user_pointer_inclusive부터 bytes만큼 physical memory에 고정시킨다.
    BLOCK_FILESYS, BLOCK_SWAP 와 같은 block device를 컨트롤하는 block device driver가 있다.
    BLOCK_FILESYS에서 block_read(), block_write()를 호출하는 도중에 page_fault()가 발생하여
-   BLOCK_SWAP에서 block_read(), block_write()를 호출하는 상황이 발생하면 안된다. */
+   BLOCK_SWAP에서 block_read(), block_write()를 호출하는 상황이 발생하면 안된다.
+   
+   user_pointer_inclusive 부터 bytes까지 swap device에 존재하는 페이지는 physical memory로 데려온다. */
 static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes){
   struct thread* t = thread_current();
   
+  void* new_page = NULL;
   for(size_t i = 0; i < bytes; ++i){
-    struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, pg_round_down(user_pointer_inclusive + i));
-    if(spte->frame_data_clue == SWAP)
-      vm_load_spte_to_user_pool (spte);
-    vm_frame_set_for_user_pointer(vm_frame_lookup(spte->kernel_virtual_page_in_user_pool), true);
+      //페이지가 달라진 경우
+      if(new_page != pg_round_down(user_pointer_inclusive + i)){
+        //advanced
+        new_page = pg_round_down(user_pointer_inclusive + i);
+
+        //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
+        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
+        if(spte->frame_data_clue == SWAP)
+          vm_load_spte_to_user_pool (spte);
+
+        //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
+        struct vm_ft_same_keys* founds = vm_frame_lookup(spte->kernel_virtual_page_in_user_pool); 
+        vm_frame_set_for_user_pointer(founds, true);
+        vm_ft_same_keys_free(founds);
+      }
   }
 }
 static void unmake(void* user_pointer_inclusive, size_t bytes){
   struct thread* t = thread_current();
 
+  void* new_page = NULL;
   for(size_t i = 0; i < bytes; ++i){
-    struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, pg_round_down(user_pointer_inclusive + i));
-    vm_frame_set_for_user_pointer(vm_frame_lookup(spte->kernel_virtual_page_in_user_pool), false);
+      //페이지가 달라진 경우
+      if(new_page != pg_round_down(user_pointer_inclusive + i)){
+        //advanced
+        new_page = pg_round_down(user_pointer_inclusive + i);
+
+        //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
+        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
+
+        //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
+        struct vm_ft_same_keys* founds = vm_frame_lookup(spte->kernel_virtual_page_in_user_pool); 
+        vm_frame_set_for_user_pointer(founds, false);
+        vm_ft_same_keys_free(founds);
+      }
   }
 }

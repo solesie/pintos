@@ -14,6 +14,7 @@
 #include "threads/malloc.h"
 #include "vm/frame-table.h"
 #include "lib/kernel/list.h"
+#include "lib/kernel/hash.h"
 
 #define list_elem_to_hash_elem(LIST_ELEM)                       \
         list_entry(LIST_ELEM, struct vm_ft_hash_elem, list_elem)
@@ -123,6 +124,7 @@ vm_ft_hash_find (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
    따라서 그 배열을 삭제해주어야 한다. */
 void vm_ft_same_keys_free(struct vm_ft_same_keys* arr){
   free(arr->pointers_arr_of_ft_hash_elem);
+  free(arr);
 }
 
 
@@ -140,7 +142,7 @@ vm_ft_hash_delete (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
   
   for (int i = 0; i < founds->len; ++i)
     remove_elem (h, founds->pointers_arr_of_ft_hash_elem[i]);
-  
+
   rehash (h); 
 
   return founds;
@@ -259,22 +261,23 @@ find_elem (struct vm_ft_hash *h, struct list *bucket, struct vm_ft_hash_elem *e)
       if (!h->less (hi, e, h->aux) && !h->less (e, hi, h->aux))
         ++same;
     }
-  
+
   if(same == 0) return NULL;
-  
+
   struct vm_ft_same_keys* ret = malloc(sizeof(struct vm_ft_same_keys));
   ret->len = same;
   ret->pointers_arr_of_ft_hash_elem = malloc(sizeof(struct vm_ft_hash_elem*) * same);
 
   int count = 0;
-  for (i = list_begin (bucket); i != list_end (bucket); i = list_next (i), ++count) 
+  for (i = list_begin (bucket); i != list_end (bucket); i = list_next (i)) 
     {
       struct vm_ft_hash_elem *hi = list_elem_to_hash_elem (i);
       if (!h->less (hi, e, h->aux) && !h->less (e, hi, h->aux)){
         ret->pointers_arr_of_ft_hash_elem[count] = hi;
+        ++count;
       }
     }
-  
+    
   return ret;
 }
 
