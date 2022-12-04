@@ -180,26 +180,29 @@ static struct vm_ft_same_keys* pick_frame_to_evict(void){
 /* swap.c:vm_swap_out() */
 static void vm_evict_a_frame_to_swap_device(){
   struct vm_ft_same_keys* founds = pick_frame_to_evict();
-  struct frame_table_entry* one_in_founds = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem);
+  //frame table에서 evict할 frame을 모두 없앤다.
+  struct vm_ft_same_keys* removed = vm_ft_hash_delete_same_keys (&frame_table, founds->pointers_arr_of_ft_hash_elem[0]);
+  vm_ft_same_keys_free(founds);
 
-  //founds의 key(kernel_virtual_page_in_user_pool)는 모두 같다. one_in_founds의 내용을 swap devide에 기록한다.
-  size_t swap_idx = vm_swap_out(one_in_founds->kernel_virtual_page_in_user_pool, founds->len);
+  //내용을 swap devide에 기록한다.
+  struct frame_table_entry* one_of_removed = vm_ft_hash_entry(removed->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem);
+  size_t swap_idx = vm_swap_out(one_of_removed->kernel_virtual_page_in_user_pool, removed->len);
 
-  //evict할 frame과 연관되어 있는 user page를 갱신한다.
-  for(int i = 0; i < founds->len; ++i){
+  void* kpage = one_of_removed->kernel_virtual_page_in_user_pool;
+
+  for(int i = 0; i < removed->len; ++i){
+    struct frame_table_entry* fte = vm_ft_hash_entry(removed->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
+
     //fte의 정보와 일치하는 spte를 찾아서 갱신한다.
-    struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
     struct supplemental_page_table_entry* spte = vm_spt_lookup(&fte->t->spt, fte->user_page);
-
     vm_spt_update_after_swap_out(spte, swap_idx);
 
-    //pagedir에서 fte->user_page의 정보를 없앤다.
+    //pagedir에서 present bit 갱신
     pagedir_clear_page(fte->t->pagedir, fte->user_page);
+    free(fte);
   }
-
-  vm_ft_hash_delete_same_keys (&frame_table, &one_in_founds->elem);// frame table에서 이 frame을 없앤다.
-  palloc_free_page(one_in_founds->kernel_virtual_page_in_user_pool);// physical memory에서 이 frame을 없앤다.
-  vm_ft_same_keys_free(founds);
+  palloc_free_page(kpage);//physical memory에서 이 frame을 없앤다.
+  vm_ft_same_keys_free(removed);
 }
 
 
@@ -252,24 +255,32 @@ void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
 }
 
 
-/* 인자로 받은 fte을 frame table에서 없애고 physical memory 상에서 free한다. */
-void vm_frame_free (struct vm_ft_same_keys* founds){
+/* 만약 fte->kernel_virtual_page_in_user_pool이 frame table에서 유일하다면,
+   fte가 나타내는 frame을 deallocate한다.
+   그리고 fte와 정확히 일치하는 데이터를 frame table에서 없앤다. */
+void vm_frame_free (struct frame_table_entry* fte){
   lock_acquire(&frame_table_lock);
-  struct frame_table_entry* e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0],struct frame_table_entry, elem);
 
-  // frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
-  vm_ft_hash_delete_same_keys (&frame_table, &e->elem);
-  palloc_free_page(e->kernel_virtual_page_in_user_pool);
+  struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(fte->kernel_virtual_page_in_user_pool);
+  ASSERT(others != NULL);
+  if(others->len == 1)//no sharing
+    palloc_free_page(fte->kernel_virtual_page_in_user_pool);
+  
+  vm_ft_hash_delete_exactly_identical (&frame_table, &fte->elem);
+  vm_ft_same_keys_free(others);
+  free(fte);
+
   lock_release(&frame_table_lock);
 }
 
 
 /* user program이 종료될 때 pagedir_destory()가 호출되면서 실제 physical memory에서 free된다. 
-   이때 frame_table에서는 따로 지워주어야한다. */
+   이때 frame_table에서는 따로 지워주어야한다.
+   fte의 정보와 정확히 일치하는 데이터를 frame_table에서 없애고 fte를 deallocate한다. */
 void vm_frame_free_only_in_ft(struct frame_table_entry* fte){
   lock_acquire(&frame_table_lock);
-
   vm_ft_hash_delete_exactly_identical (&frame_table, &fte->elem);
+  free(fte);
   lock_release(&frame_table_lock);
 }
 

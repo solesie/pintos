@@ -56,13 +56,7 @@ bool vm_load_spte_to_user_pool(struct supplemental_page_table_entry* spte){
   if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
     PANIC("install_page 에러");
     struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kernel_virtual_page_in_user_pool);
-    vm_frame_free_only_in_ft(fte);
-    struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kernel_virtual_page_in_user_pool);
-    if(others == NULL){ //no sharing
-      palloc_free_page(kernel_virtual_page_in_user_pool);
-    }
-    if(others != NULL) //sharing(do nothing)
-      vm_ft_same_keys_free(others);
+    vm_frame_free(fte);
     return false;
   }
   
