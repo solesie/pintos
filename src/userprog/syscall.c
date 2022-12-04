@@ -527,7 +527,7 @@ static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, s
           vm_load_spte_to_user_pool (spte);
 
         //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
-        struct vm_ft_same_keys* founds = vm_frame_lookup(spte->kernel_virtual_page_in_user_pool); 
+        struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
         vm_frame_set_for_user_pointer(founds, true);
         vm_ft_same_keys_free(founds);
       }
@@ -547,7 +547,7 @@ static void unmake(void* user_pointer_inclusive, size_t bytes){
         struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
 
         //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
-        struct vm_ft_same_keys* founds = vm_frame_lookup(spte->kernel_virtual_page_in_user_pool); 
+        struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
         vm_frame_set_for_user_pointer(founds, false);
         vm_ft_same_keys_free(founds);
       }

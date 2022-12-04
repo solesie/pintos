@@ -6,6 +6,9 @@
 #include "threads/pte.h"
 #include "threads/palloc.h"
 
+#include "vm/frame-table.h"
+#include "vm/frame.h"
+
 static uint32_t *active_pd (void);
 static void invalidate_pagedir (uint32_t *);
 
@@ -40,8 +43,21 @@ pagedir_destroy (uint32_t *pd)
         uint32_t *pte;
         
         for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
-          if (*pte & PTE_P) 
-            palloc_free_page (pte_get_page (*pte));
+          if (*pte & PTE_P) {
+            void* page = pte_get_page (*pte);//아마 kernel_pool일 수도 있다고 확신한다(thread PCB 등).
+#ifdef VM
+            /* process.c:process_exit():vm_spt_destroy()를 실행하였다.
+               만약 page가 user pool에 존재한다면 frame table에서 삭제되었을 것이다. */
+            struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(page);
+            if(others == NULL){ //kernel pool or no sharing
+              palloc_free_page(page);
+            }
+            if(others != NULL) //user pool and sharing(do nothing)
+              vm_ft_same_keys_free(others);
+#else
+            palloc_free_page (page);
+#endif
+          }
         palloc_free_page (pt);
       }
   palloc_free_page (pd);

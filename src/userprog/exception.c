@@ -118,15 +118,12 @@ static bool grow_user_stack(void* faulted_page){
   void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, faulted_page);
   if(kernel_virtual_page_in_user_pool == NULL){
     PANIC("frame allocate 에러");
-    return false;
+    exit(-1);
   }
 
   if(!install_page(faulted_page, kernel_virtual_page_in_user_pool, true)) {
     PANIC("install_page 에러");
-    struct vm_ft_same_keys* founds = vm_frame_lookup(kernel_virtual_page_in_user_pool);
-    vm_frame_free(founds);
-    vm_ft_same_keys_free(founds);
-    return false;
+    exit(-1);
   }
   
   return true;

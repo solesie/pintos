@@ -51,6 +51,11 @@ typedef bool vm_ft_hash_less_func (const struct vm_ft_hash_elem*a,
                              const struct vm_ft_hash_elem*b,
                              void *aux);
 
+/* key도 같고, value도 같은지 확인하기 위해 정의한다. */
+typedef bool vm_ft_hash_value_less_func(const struct vm_ft_hash_elem*a,
+                             const struct vm_ft_hash_elem*b,
+                             void *aux);
+
 /* Performs some operation on hash element E, given auxiliary
    data AUX. */
 typedef void vm_ft_hash_action_func (struct vm_ft_hash_elem*e, void *aux);
@@ -63,6 +68,9 @@ struct vm_ft_hash
     struct list *buckets;       /* Array of `bucket_cnt' lists. */
     vm_ft_hash_hash_func *hash;       /* Hash function. */
     vm_ft_hash_less_func *less;       /* Comparison function. */
+
+    vm_ft_hash_value_less_func* value_less;   /* Value 비교 함수 */
+
     void *aux;                  /* Auxiliary data for `hash' and `less'. */
   };
 
@@ -80,7 +88,7 @@ struct vm_ft_same_keys{
 };
 
 /* Basic life cycle. */
-bool vm_ft_hash_init (struct vm_ft_hash *, vm_ft_hash_hash_func *, vm_ft_hash_less_func *, void *aux);
+bool vm_ft_hash_init (struct vm_ft_hash *, vm_ft_hash_hash_func *, vm_ft_hash_less_func *, vm_ft_hash_value_less_func *, void *aux);
 void vm_ft_hash_clear (struct vm_ft_hash *, vm_ft_hash_action_func *);
 void vm_ft_hash_destroy (struct vm_ft_hash *, vm_ft_hash_action_func *);
 
@@ -88,8 +96,10 @@ void vm_ft_same_keys_free(struct vm_ft_same_keys* arr);
 
 /* Search, insertion, deletion. */
 void vm_ft_hash_insert (struct vm_ft_hash *, struct vm_ft_hash_elem*);
-struct vm_ft_same_keys* vm_ft_hash_find (struct vm_ft_hash *, struct vm_ft_hash_elem*);
-struct vm_ft_same_keys* vm_ft_hash_delete (struct vm_ft_hash *, struct vm_ft_hash_elem*);
+struct vm_ft_same_keys* vm_ft_hash_find_same_keys (struct vm_ft_hash *, struct vm_ft_hash_elem*);
+struct vm_ft_hash_elem* vm_ft_hash_find_exactly_identical(struct vm_ft_hash *, struct vm_ft_hash_elem *);
+struct vm_ft_same_keys* vm_ft_hash_delete_same_keys (struct vm_ft_hash *, struct vm_ft_hash_elem*);
+struct vm_ft_hash_elem* vm_ft_hash_delete_exactly_identical (struct vm_ft_hash *h, struct vm_ft_hash_elem *e);
 
 /* Iteration. */
 void vm_ft_hash_first (struct vm_ft_hash_iterator *, struct vm_ft_hash *);

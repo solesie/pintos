@@ -55,9 +55,14 @@ bool vm_load_spte_to_user_pool(struct supplemental_page_table_entry* spte){
   //Modify page and swap manage tables
   if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
     PANIC("install_page 에러");
-    struct vm_ft_same_keys* founds = vm_frame_lookup(kernel_virtual_page_in_user_pool);
-    vm_frame_free(founds);
-    vm_ft_same_keys_free(founds);
+    struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kernel_virtual_page_in_user_pool);
+    vm_frame_free_only_in_ft(fte);
+    struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kernel_virtual_page_in_user_pool);
+    if(others == NULL){ //no sharing
+      palloc_free_page(kernel_virtual_page_in_user_pool);
+    }
+    if(others != NULL) //sharing(do nothing)
+      vm_ft_same_keys_free(others);
     return false;
   }
   
@@ -80,11 +85,11 @@ static void spte_destroy_func(struct hash_elem *elem, void *aux UNUSED){
   /* user program이 종료될 때 pagedir_destory()가 호출되면서 실제 physical memory에서 free된다. 
      이때 frame_table에서 지워주어야한다. */
   if (entry->frame_data_clue == IN_FRAME) {
-    struct vm_ft_same_keys* founds = vm_frame_lookup(entry->kernel_virtual_page_in_user_pool);
-    vm_frame_free_only_in_ft(founds);
-    vm_ft_same_keys_free(founds);
+    vm_frame_free_only_in_ft(vm_frame_lookup_exactly_identical(entry));
   }
   else if(entry->frame_data_clue == SWAP) {
+    //스왑 영역에 참조하는 프로세스가 몇개인지도 알아내야한다...
+
     vm_swap_free (entry->swap_slot);
   }
 

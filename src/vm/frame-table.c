@@ -25,18 +25,23 @@ static struct vm_ft_same_keys* find_elem (struct vm_ft_hash *, struct list *,
 static void insert_elem (struct vm_ft_hash *, struct list *, struct vm_ft_hash_elem *);
 static struct list_elem * remove_elem (struct vm_ft_hash *, struct vm_ft_hash_elem *);
 static void rehash (struct vm_ft_hash *);
+static struct vm_ft_hash_elem* find_elem_exactly_identical(struct vm_ft_hash *h, 
+                                  struct list *bucket, struct vm_ft_hash_elem *e);
 
 /* Initializes hash table H to compute hash values using HASH and
    compare hash elements using LESS, given auxiliary data AUX. */
 bool
 vm_ft_hash_init (struct vm_ft_hash *h,
-           vm_ft_hash_hash_func *hash, vm_ft_hash_less_func *less, void *aux) 
+           vm_ft_hash_hash_func *hash, vm_ft_hash_less_func *less, vm_ft_hash_value_less_func* value_less , void *aux) 
 {
   h->elem_cnt = 0;
   h->bucket_cnt = 4;
   h->buckets = malloc (sizeof *h->buckets * h->bucket_cnt);
   h->hash = hash;
   h->less = less;
+
+  h->value_less = value_less;
+
   h->aux = aux;
 
   if (h->buckets != NULL) 
@@ -113,9 +118,14 @@ vm_ft_hash_insert (struct vm_ft_hash *h, struct vm_ft_hash_elem *new)
 /* Finds and returns "list of elements" equal to E in hash table H, or a
    null pointer if no equal element exists in the table. */
 struct vm_ft_same_keys*
-vm_ft_hash_find (struct vm_ft_hash *h, struct vm_ft_hash_elem *e) 
+vm_ft_hash_find_same_keys (struct vm_ft_hash *h, struct vm_ft_hash_elem *e) 
 {
   return find_elem (h, find_bucket (h, e), e);
+}
+
+/* E와 완전히 동일한 element를 반환한다. */
+struct vm_ft_hash_elem* vm_ft_hash_find_exactly_identical(struct vm_ft_hash *h, struct vm_ft_hash_elem *e){
+  return find_elem_exactly_identical(h, find_bucket (h, e), e);
 }
 
 
@@ -134,7 +144,7 @@ void vm_ft_same_keys_free(struct vm_ft_same_keys* arr){
    
    동일한 e를 전부다 제거한다. */
 struct vm_ft_same_keys*
-vm_ft_hash_delete (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
+vm_ft_hash_delete_same_keys (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
 {
   struct vm_ft_same_keys* founds = find_elem(h, find_bucket(h,e), e);
   if(founds == NULL)
@@ -146,6 +156,19 @@ vm_ft_hash_delete (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
   rehash (h); 
 
   return founds;
+}
+
+
+struct vm_ft_hash_elem *
+vm_ft_hash_delete_exactly_identical (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
+{
+  struct vm_ft_hash_elem *found = find_elem_exactly_identical (h, find_bucket (h, e), e);
+  if (found != NULL) 
+    {
+      remove_elem (h, found);
+      rehash (h); 
+    }
+  return found;
 }
 
 
@@ -246,8 +269,27 @@ find_bucket (struct vm_ft_hash *h, struct vm_ft_hash_elem *e)
 
 
 /* Searches BUCKET in H for a hash element equal to E.  Returns
+   it if found or a null pointer otherwise.
+   user_page도 일치해야한다. */
+static struct vm_ft_hash_elem* 
+find_elem_exactly_identical(struct vm_ft_hash *h, struct list *bucket, struct vm_ft_hash_elem *e)
+{
+  struct list_elem *i;
+
+  for (i = list_begin (bucket); i != list_end (bucket); i = list_next (i)) 
+    {
+      struct vm_ft_hash_elem *hi = list_elem_to_hash_elem (i);
+      if (!h->less (hi, e, h->aux) && !h->less (e, hi, h->aux)
+      && !h->value_less (hi, e, h->aux) && !h->value_less (e, hi, h->aux)){
+        return hi;
+      }
+    }
+  return NULL;
+}
+
+
+/* Searches BUCKET in H for a hash element equal to E.  Returns
    it if found or a null pointer otherwise. */
-//static struct hash_elem *
 static struct vm_ft_same_keys*
 find_elem (struct vm_ft_hash *h, struct list *bucket, struct vm_ft_hash_elem *e) 
 {

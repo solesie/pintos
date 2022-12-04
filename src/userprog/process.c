@@ -157,9 +157,10 @@ process_exit (void)
   uint32_t *pd;
 
   /* (PANIC 발생 시 예외) 이 스레드가 점유하고있는 global lock들을 해제해야한다. (implement later) */
-
+#ifdef VM
   /* spt 메모리 해제 (implement later) */
   vm_spt_destroy(&cur->spt);
+#endif
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -553,9 +554,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
 #ifdef VM
-          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
-          vm_frame_free(founds);
-          vm_ft_same_keys_free(founds);
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          vm_frame_free_only_in_ft(fte);
+          struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
+          if(others == NULL){ //no sharing
+            palloc_free_page(page);
+          }
+          if(others != NULL) //sharing(do nothing)
+            vm_ft_same_keys_free(others);
 #else
           palloc_free_page(kpage);
 #endif
@@ -569,9 +575,14 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (!install_page (upage, kpage, writable)) 
         {
 #ifdef VM
-          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
-          vm_frame_free(founds);
-          vm_ft_same_keys_free(founds);
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          vm_frame_free_only_in_ft(fte);
+          struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
+          if(others == NULL){ //no sharing
+            palloc_free_page(page);
+          }
+          if(others != NULL) //sharing(do nothing)
+            vm_ft_same_keys_free(others);
 #else
           palloc_free_page(kpage);
 #endif
@@ -608,9 +619,14 @@ setup_stack (void **esp)
         *esp = PHYS_BASE;
       else{
 #ifdef VM
-          struct vm_ft_same_keys* founds = vm_frame_lookup(kpage);
-          vm_frame_free(founds->pointers_arr_of_ft_hash_elem[0]);
-          vm_ft_same_keys_free(founds);
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          vm_frame_free_only_in_ft(fte);
+          struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
+          if(others == NULL){ //no sharing
+            palloc_free_page(page);
+          }
+          if(others != NULL) //sharing(do nothing)
+            vm_ft_same_keys_free(others);
 #else
           palloc_free_page(kpage);
 #endif

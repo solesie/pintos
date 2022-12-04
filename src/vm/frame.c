@@ -40,6 +40,7 @@ static struct lock frame_table_lock;
 
 static unsigned frame_table_hash_func(const struct vm_ft_hash_elem* e, void* aux);
 static bool frame_table_less_func(const struct vm_ft_hash_elem* a, const struct vm_ft_hash_elem* b, void* aux);
+static bool frame_table_value_less_func(const struct vm_ft_hash_elem*a, const struct vm_ft_hash_elem*b, void *aux);
 
 
 struct frame_table_entry{
@@ -77,7 +78,7 @@ struct frame_table_entry{
     
     struct vm_ft_hash_elem same_elem;    /* 같은키의 값을 위한 vm_ft_hash_elem */
 
-    int debug;
+    // int debug;
 };
 
 // void vm_ft_debug2(struct vm_ft_same_keys* hes){
@@ -90,54 +91,56 @@ struct frame_table_entry{
 // void vm_ft_debug(){
 //   struct vm_ft_hash_iterator i;
 //   struct vm_ft_hash vm_ft_frame_table;
-//   vm_ft_hash_init(&vm_ft_frame_table, frame_table_hash_func, frame_table_less_func, NULL);
+//   vm_ft_hash_init(&vm_ft_frame_table, frame_table_hash_func, frame_table_less_func, frame_table_value_less_func, NULL);
 
 
 //   struct frame_table_entry* fte1 = malloc(sizeof(struct frame_table_entry));
-//   fte1->kernel_virtual_page_in_user_pool = 1;
-//   fte1->debug = 1;
+//   fte1->kernel_virtual_page_in_user_pool = 123;
+//   fte1->user_page = 1;
 //   struct frame_table_entry* fte2 = malloc(sizeof(struct frame_table_entry));
-//   fte2->kernel_virtual_page_in_user_pool = 12;
-//   fte2->debug = 2;
+//   fte2->kernel_virtual_page_in_user_pool = 123;
+//   fte2->user_page = 2;
 //   struct frame_table_entry* fte3 = malloc(sizeof(struct frame_table_entry));
 //   fte3->kernel_virtual_page_in_user_pool = 123;
-//   fte3->debug = 3;
+//   fte3->user_page = 3;
 //   vm_ft_hash_insert(&vm_ft_frame_table, &fte1->elem);
-//   struct vm_ft_same_keys* founds1 = vm_ft_hash_find(&vm_ft_frame_table, &fte1->elem);
 //   vm_ft_hash_insert(&vm_ft_frame_table, &fte2->elem);
-//   struct vm_ft_same_keys* founds2 = vm_ft_hash_find(&vm_ft_frame_table, &fte1->elem);
 //   vm_ft_hash_insert(&vm_ft_frame_table, &fte3->elem);
-//   struct vm_ft_same_keys* founds3 = vm_ft_hash_find(&vm_ft_frame_table, &fte1->elem);
-//   printf("%p\n",vm_ft_hash_entry (founds1->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem)->kernel_virtual_page_in_user_pool);
-//   printf("%p\n",vm_ft_hash_entry (founds2->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem)->kernel_virtual_page_in_user_pool);
-//   printf("%p\n",vm_ft_hash_entry (founds3->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem)->kernel_virtual_page_in_user_pool);
 
-//   // vm_ft_hash_first (&i, &vm_ft_frame_table);
-//   // while (vm_ft_hash_next (&i))
-//   //   {
-//   //     //struct vm_ft_same_keys* founds = vm_ft_hash_find(&frame_table, vm_ft_hash_cur(&i));
-//   //     struct vm_ft_same_keys* founds = vm_ft_hash_find(&vm_ft_frame_table, vm_ft_hash_cur(&i));
-//   //     printf("%p\n",vm_ft_hash_entry (founds->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem)->kernel_virtual_page_in_user_pool);
-//   //     printf("%p\n",vm_ft_hash_entry(vm_ft_hash_cur(&i), struct frame_table_entry, elem)->kernel_virtual_page_in_user_pool);
-//   //     vm_ft_same_keys_free(founds);
-//   //   }
-//   // printf("\n\n");
+//   struct vm_ft_hash_elem* e = vm_ft_hash_find_exactly_identical(&vm_ft_frame_table, &fte2->elem);
+//   printf("%d\n\n",vm_ft_hash_entry (e, struct frame_table_entry, elem)->user_page);
+//   vm_ft_hash_delete_exactly_identical(&vm_ft_frame_table, &fte2->elem);
+//   vm_ft_hash_first (&i, &vm_ft_frame_table);
+//   while (vm_ft_hash_next (&i))
+//     {
+//       printf("%d\n",vm_ft_hash_entry(vm_ft_hash_cur(&i), struct frame_table_entry, elem)->user_page);
+//     }
 // }
 
 
 void vm_frame_init(){
-  //vm_ft_debug();
+  // vm_ft_debug();
   lock_init(&frame_table_lock);
-  vm_ft_hash_init(&frame_table, frame_table_hash_func, frame_table_less_func, NULL);
+  vm_ft_hash_init(&frame_table, frame_table_hash_func, frame_table_less_func, frame_table_value_less_func, NULL);
 }
 
 /* 이 함수 사용후 반환값을 vm_ft_same_keys_free를 통해 해제해야 한다. */
-struct vm_ft_same_keys* vm_frame_lookup(void* kernel_virtual_page_in_user_pool){
+struct vm_ft_same_keys* vm_frame_lookup_same_keys(void* kernel_virtual_page_in_user_pool){
   struct frame_table_entry key;
   key.kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
-  struct vm_ft_same_keys* founds = vm_ft_hash_find(&frame_table, &(key.elem));
-  ASSERT(founds != NULL);
+  struct vm_ft_same_keys* founds = vm_ft_hash_find_same_keys(&frame_table, &(key.elem));
   return founds;
+}
+
+
+/* 정확히 spte의 내용과 일치하는 frame_table_entry 하나를 반환한다. */
+struct frame_table_entry* vm_frame_lookup_exactly_identical(struct supplemental_page_table_entry* spte){
+  ASSERT(spte->frame_data_clue == IN_FRAME);
+  struct frame_table_entry key;
+  key.kernel_virtual_page_in_user_pool = spte->kernel_virtual_page_in_user_pool;
+  key.user_page = spte->user_page;
+  struct vm_ft_hash_elem* e = vm_ft_hash_find_exactly_identical(&frame_table, &(key.elem));
+  return vm_ft_hash_entry(e, struct frame_table_entry, elem);
 }
 
 
@@ -165,7 +168,7 @@ static struct vm_ft_same_keys* pick_frame_to_evict(void){
     vm_ft_hash_first(&it, &frame_table);
     size_t i; for(i=0; i<=pointer; ++i) vm_ft_hash_next(&it);
 
-    struct vm_ft_same_keys* founds = vm_ft_hash_find(&frame_table, vm_ft_hash_cur(&it));
+    struct vm_ft_same_keys* founds = vm_ft_hash_find_same_keys(&frame_table, vm_ft_hash_cur(&it));
     struct frame_table_entry *e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem);
     ASSERT(founds != NULL);
     if(can_be_evicted(founds))
@@ -194,7 +197,7 @@ static void vm_evict_a_frame_to_swap_device(){
     pagedir_clear_page(fte->t->pagedir, fte->user_page);
   }
 
-  vm_ft_hash_delete (&frame_table, &one_in_founds->elem);// frame table에서 이 frame을 없앤다.
+  vm_ft_hash_delete_same_keys (&frame_table, &one_in_founds->elem);// frame table에서 이 frame을 없앤다.
   palloc_free_page(one_in_founds->kernel_virtual_page_in_user_pool);// physical memory에서 이 frame을 없앤다.
   vm_ft_same_keys_free(founds);
 }
@@ -255,7 +258,7 @@ void vm_frame_free (struct vm_ft_same_keys* founds){
   struct frame_table_entry* e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0],struct frame_table_entry, elem);
 
   // frame table에서 kernel_virtual_page에 해당하는 frame table entry를 없앤다.
-  vm_ft_hash_delete (&frame_table, &e->elem);
+  vm_ft_hash_delete_same_keys (&frame_table, &e->elem);
   palloc_free_page(e->kernel_virtual_page_in_user_pool);
   lock_release(&frame_table_lock);
 }
@@ -263,11 +266,10 @@ void vm_frame_free (struct vm_ft_same_keys* founds){
 
 /* user program이 종료될 때 pagedir_destory()가 호출되면서 실제 physical memory에서 free된다. 
    이때 frame_table에서는 따로 지워주어야한다. */
-void vm_frame_free_only_in_ft(struct vm_ft_same_keys* founds){
+void vm_frame_free_only_in_ft(struct frame_table_entry* fte){
   lock_acquire(&frame_table_lock);
-  struct frame_table_entry* e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0],struct frame_table_entry, elem);
 
-  vm_ft_hash_delete (&frame_table, &e->elem);
+  vm_ft_hash_delete_exactly_identical (&frame_table, &fte->elem);
   lock_release(&frame_table_lock);
 }
 
@@ -294,4 +296,10 @@ static bool frame_table_less_func(const struct vm_ft_hash_elem *a, const struct 
   struct frame_table_entry *fte_a = vm_ft_hash_entry(a, struct frame_table_entry, elem);
   struct frame_table_entry *fte_b = vm_ft_hash_entry(b, struct frame_table_entry, elem);
   return fte_a->kernel_virtual_page_in_user_pool < fte_b->kernel_virtual_page_in_user_pool;
+}
+static bool frame_table_value_less_func(const struct vm_ft_hash_elem*a, const struct vm_ft_hash_elem*b, void *aux)
+{
+  struct frame_table_entry *fte_a = vm_ft_hash_entry(a, struct frame_table_entry, elem);
+  struct frame_table_entry *fte_b = vm_ft_hash_entry(b, struct frame_table_entry, elem);
+  return fte_a->user_page < fte_b->user_page;
 }
