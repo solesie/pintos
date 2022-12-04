@@ -558,7 +558,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           vm_frame_free_only_in_ft(fte);
           struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
           if(others == NULL){ //no sharing
-            palloc_free_page(page);
+            palloc_free_page(kpage);
           }
           if(others != NULL) //sharing(do nothing)
             vm_ft_same_keys_free(others);
@@ -579,7 +579,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           vm_frame_free_only_in_ft(fte);
           struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
           if(others == NULL){ //no sharing
-            palloc_free_page(page);
+            palloc_free_page(kpage);
           }
           if(others != NULL) //sharing(do nothing)
             vm_ft_same_keys_free(others);
@@ -623,7 +623,7 @@ setup_stack (void **esp)
           vm_frame_free_only_in_ft(fte);
           struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(kpage);
           if(others == NULL){ //no sharing
-            palloc_free_page(page);
+            palloc_free_page(kpage);
           }
           if(others != NULL) //sharing(do nothing)
             vm_ft_same_keys_free(others);
