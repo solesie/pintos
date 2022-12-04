@@ -88,8 +88,6 @@ static void spte_destroy_func(struct hash_elem *elem, void *aux UNUSED){
     vm_frame_free_only_in_ft(vm_frame_lookup_exactly_identical(entry));
   }
   else if(entry->frame_data_clue == SWAP) {
-    //스왑 영역에 참조하는 프로세스가 몇개인지도 알아내야한다...
-
     vm_swap_free (entry->swap_slot);
   }
 

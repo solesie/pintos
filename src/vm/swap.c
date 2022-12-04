@@ -17,10 +17,12 @@
 /* Partition that contains the swap system. */
 struct block* swap_device;
 
-static struct bitmap *free_map;      /* Free map, one bit per sector. */
+/* swap table bitmap 대신 배열을 사용한다. 값은 현재 이 swap slot을 사용하는 프로세스의 개수를 나타낸다. */
+static uint8_t* swap_table;
+static int swap_table_len;
 
 /* bitmap 조작만은 무조건 lock이 걸려져야 한다. */
-static struct lock bitmap_lock;
+static struct lock swap_table_mutex;
 
 /* Initializes the swap system module. */
 void vm_swapsys_init(){
@@ -29,10 +31,13 @@ void vm_swapsys_init(){
     PANIC ("No swap system device found, can't initialize swap system.");
 
   /* free map init */
-  free_map = bitmap_create (block_size (swap_device) / NUM_OF_SECTORS_ON_A_FRAME); //free-map 생성 후 false로 초기화
-  if (free_map == NULL)
-    PANIC ("bitmap creation failed--swap system device is too large");
-  lock_init(&bitmap_lock);
+  swap_table_len = (block_size (swap_device) / NUM_OF_SECTORS_ON_A_FRAME);
+  swap_table = (uint8_t*)malloc(sizeof(uint8_t) * swap_table_len);
+  memset(swap_table, 0, sizeof(uint8_t) * swap_table_len);
+
+  if (swap_table == NULL)
+    PANIC ("swap_table creation failed--swap system device is too large");
+  lock_init(&swap_table_mutex);
 }
 
 /* swap_device에서 swap_slot에 저장된 데이터를 kernel_virtual_page_in_user_pool에 복사한다.
@@ -49,19 +54,24 @@ void vm_swap_in(size_t swap_slot, void* kernel_virtual_page_in_user_pool){
     /* Read full one sector directly into kernel_virtual_page_in_user_pool. */
     block_read (swap_device, sector_idx, kernel_virtual_page_in_user_pool + bytes_read);
   }
-  lock_acquire(&bitmap_lock);
+  lock_acquire(&swap_table_mutex);
   /* kernel space에 존재하므로 free_map->bits[swap_slot] available for use. */
-  bitmap_set(free_map, swap_slot, false);
-  lock_release(&bitmap_lock);
+  swap_table[swap_slot] = 0;
+  lock_release(&swap_table_mutex);
 }
 
 /* kernel_virtual_page_in_user_pool를 swap_device에 기록한다.
    페이지를 기록한 swap slot의 번호를 반환한다.
    write(swap_slot, kernel_virtual_page_in_user_pool, sizeof(PGSIZE)) 느낌 */
-size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
-  lock_acquire(&bitmap_lock);
-  size_t swap_slot = bitmap_scan_and_flip (free_map, 0, 1, false);
-  lock_release(&bitmap_lock);
+size_t vm_swap_out(void* kernel_virtual_page_in_user_pool, int sharing_proc_num){
+  lock_acquire(&swap_table_mutex);
+  size_t swap_slot;
+  for(swap_slot = 0; swap_slot < swap_table_len; ++swap_slot)
+    if(swap_table[swap_slot] == 0){
+      swap_table[swap_slot] = sharing_proc_num;
+      break;
+    }
+  lock_release(&swap_table_mutex);
 
   block_sector_t start = (block_sector_t)swap_slot * NUM_OF_SECTORS_ON_A_FRAME;
   off_t bytes_read;
@@ -75,10 +85,12 @@ size_t vm_swap_out(void* kernel_virtual_page_in_user_pool){
   return swap_slot;
 }
 
+
 void
 vm_swap_free (size_t swap_slot)
 {
-  lock_acquire(&bitmap_lock);
-  bitmap_set(free_map, swap_slot, true);
-  lock_release(&bitmap_lock);
+  lock_acquire(&swap_table_mutex);
+  ASSERT(swap_table[swap_slot] >=0);
+  --swap_table[swap_slot];
+  lock_release(&swap_table_mutex);
 }

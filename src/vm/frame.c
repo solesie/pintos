@@ -183,7 +183,7 @@ static void vm_evict_a_frame_to_swap_device(){
   struct frame_table_entry* one_in_founds = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem);
 
   //founds의 key(kernel_virtual_page_in_user_pool)는 모두 같다. one_in_founds의 내용을 swap devide에 기록한다.
-  size_t swap_idx = vm_swap_out(one_in_founds->kernel_virtual_page_in_user_pool);
+  size_t swap_idx = vm_swap_out(one_in_founds->kernel_virtual_page_in_user_pool, founds->len);
 
   //evict할 frame과 연관되어 있는 user page를 갱신한다.
   for(int i = 0; i < founds->len; ++i){
