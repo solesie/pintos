@@ -5,7 +5,7 @@
    same executable file, share read-only pages among those processes instead of
    creating separate copies of read-only segments for each process.
    
-   mmap 사용시에만 sharing을 구현한다. 한 frame이 여러 user_page를 저장할 수 있도록 한다.
+   추후, 같은 실행파일에 대해 sharing을 구현한다. 한 frame이 여러 user_page를 저장할 수 있도록 한다.
    즉, hash에 중복을 허용하여 bucket에 저장하는 함수들을 구현한다.
    frame.c:struct hash frame_table만 이 함수들을 사용하도록 한다. */
 
