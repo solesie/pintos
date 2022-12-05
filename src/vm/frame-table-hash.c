@@ -12,7 +12,7 @@
 //#include "lib/kernel/hash.h"
 #include "lib/debug.h"
 #include "threads/malloc.h"
-#include "vm/frame-table.h"
+#include "vm/frame-table-hash.h"
 #include "lib/kernel/list.h"
 #include "lib/kernel/hash.h"
 

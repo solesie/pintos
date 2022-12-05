@@ -3,7 +3,7 @@
 
 #include "threads/synch.h"
 #include "threads/palloc.h"
-#include "vm/frame-table.h"
+#include "vm/frame-table-hash.h"
 #include "vm/page.h"
 
 void vm_frame_init (void);

@@ -6,7 +6,7 @@
 #include "threads/pte.h"
 #include "threads/palloc.h"
 
-#include "vm/frame-table.h"
+#include "vm/frame-table-hash.h"
 #include "vm/frame.h"
 
 static uint32_t *active_pd (void);
@@ -49,9 +49,8 @@ pagedir_destroy (uint32_t *pd)
             /* process.c:process_exit():vm_spt_destroy()를 실행하였다.
                만약 page가 user pool에 존재한다면 frame table에서 삭제되었을 것이다. */
             struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(page);
-            if(others == NULL){ //kernel pool or no sharing
+            if(others == NULL) //kernel pool or no sharing
               palloc_free_page(page);
-            }
             if(others != NULL) //user pool and sharing(do nothing)
               vm_ft_same_keys_free(others);
 #else

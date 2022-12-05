@@ -5,7 +5,7 @@
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
 
-#include "vm/frame-table.h"
+#include "vm/frame-table-hash.h"
 
 /* frame table은 user page를 저장하고 있는 frame에 대한 정보를 저장한다.
    즉, 모든 프레임들을 저장하지 않고, per system이다.
