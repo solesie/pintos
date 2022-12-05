@@ -6,9 +6,10 @@
 #include "filesys/off_t.h"
 
 enum clue_of_frame_data{
-    SWAP,           /* swap disk에 존재한다. */
-    IN_FRAME        /* 현재 physical memory에 존재한다. */
-    //ZEROING         /* mmap에서 이용(구현 사항 없음) */
+    IN_SWAP,        /* swap disk에 존재한다. */
+    IN_FRAME,       /* 현재 physical memory에 존재한다. */
+    //ZEROING,        /* mmap에서 이용 */
+    IN_FILE         /* mmap에서 이용(lazy load) */
 };
 /* supplemental page table은 추가적인 정보로 page table을 보완한다.
    즉, page table을 나타내고, per process이다.
@@ -38,6 +39,12 @@ struct supplemental_page_table_entry{
     bool writable;                                   /* same as pte R/W bit */
 
     size_t swap_slot;                                /* frame이 swap_device에 존재하는 경우 어느 슬롯에 잇는가 */
+
+    // mmap
+    bool dirty;
+    struct file *file;
+    off_t file_offset;
+    uint32_t read_bytes, zero_bytes;
 };
 
 void vm_spt_create(struct hash*);
@@ -45,5 +52,10 @@ void vm_spt_destroy (struct hash* spt);
 
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
 void vm_spt_update_after_swap_out(struct supplemental_page_table_entry* spte, size_t swap_slot);
+
+void vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
+, bool writable);
+void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
+, bool writable);
 
 #endif /* vm/page.h */

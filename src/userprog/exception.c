@@ -219,7 +219,7 @@ page_fault (struct intr_frame *f)
   struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, faulted_user_page);
   if(spte != NULL && !is_kernel_vaddr(faulted_user_page) && (not_present || !write)){
     //Call handle_mm_fault
-    if(spte->frame_data_clue == SWAP && vm_load_spte_to_user_pool(spte)){
+    if(spte->frame_data_clue == IN_SWAP && vm_load_spte_to_user_pool(spte)){
       pagedir_set_dirty (t->pagedir, spte->kernel_virtual_page_in_user_pool, false);
       //Restart process
       return;

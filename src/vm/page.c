@@ -10,7 +10,7 @@ static bool spte_less_func(const struct hash_elem *, const struct hash_elem *, v
 static void spte_destroy_func(struct hash_elem *elem, void *aux UNUSED);
 
 void vm_spt_create(struct hash* spt){
-    hash_init(spt, spte_hash_func, spte_less_func, NULL);
+  hash_init(spt, spte_hash_func, spte_less_func, NULL);
 }
 
 
@@ -32,7 +32,7 @@ struct supplemental_page_table_entry* vm_spt_lookup(struct hash* spt, void* user
 
 
 void vm_spt_update_after_swap_out(struct supplemental_page_table_entry* spte, size_t swap_slot){
-  spte->frame_data_clue = SWAP;
+  spte->frame_data_clue = IN_SWAP;
   spte->kernel_virtual_page_in_user_pool = NULL;
   spte->swap_slot = swap_slot;
 }
@@ -41,7 +41,7 @@ void vm_spt_update_after_swap_out(struct supplemental_page_table_entry* spte, si
 /* swap device의 데이터를 frame table에 올려둔다(swap.c:vm_swap_in() 사용).
    성공 여부를 반환한다. proj4 pptx)Page Fault Handler 참조 */
 bool vm_load_spte_to_user_pool(struct supplemental_page_table_entry* spte){
-  ASSERT(spte->frame_data_clue == SWAP);
+  ASSERT(spte->frame_data_clue == IN_SWAP);
   //Is there remaining?
   void* kernel_virtual_page_in_user_pool = vm_frame_allocate(PAL_USER, spte -> user_page);//Page replacement algorithm
   if(kernel_virtual_page_in_user_pool == NULL){
@@ -53,7 +53,7 @@ bool vm_load_spte_to_user_pool(struct supplemental_page_table_entry* spte){
   vm_swap_in(spte->swap_slot, kernel_virtual_page_in_user_pool);
 
   //Modify page and swap manage tables
-  if(!install_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
+  if(!reinstall_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable)) {
     PANIC("install_page 에러");
     struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kernel_virtual_page_in_user_pool);
     vm_frame_free(fte);
@@ -61,6 +61,39 @@ bool vm_load_spte_to_user_pool(struct supplemental_page_table_entry* spte){
   }
   
   return true;
+}
+
+
+//bool vm_load_file_to_user_pool(struct )
+
+/* 이미 spt에 user_page가 존재하는 경우는 kernel_virtual_page_in_user_pool로 갱신한다. */
+void vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
+, bool writable){
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
+  ASSERT(spte != NULL);
+
+  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+  spte->frame_data_clue = IN_FRAME;
+  spte->writable = writable;
+  return;
+}
+
+
+/* spt에 user_page와 kernel_virtual_page_in_user_pool를 연관시킨 spte를 삽입한다. */
+void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
+, bool writable){
+  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
+  ASSERT(spte == NULL);
+
+  /* spt에 아예 존재하지 않는경우는 새로 설치한다. */
+  spte = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
+  spte->user_page = user_page;
+  spte->frame_data_clue = IN_FRAME;
+  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
+  spte->writable = writable;
+
+  hash_insert (spt, &spte->elem);
+  return;
 }
 
 
@@ -81,7 +114,7 @@ static void spte_destroy_func(struct hash_elem *elem, void *aux UNUSED){
   if (entry->frame_data_clue == IN_FRAME) {
     vm_frame_free_only_in_ft(vm_frame_lookup_exactly_identical(entry));
   }
-  else if(entry->frame_data_clue == SWAP) {
+  else if(entry->frame_data_clue == IN_SWAP) {
     vm_swap_free (entry->swap_slot);
   }
 

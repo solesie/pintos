@@ -617,30 +617,6 @@ setup_stack (void **esp)
   return success;
 }
 
-/* spt에 user_page와 kernel_virtual_page_in_user_pool를 연관시킨 spte를 삽입한다.
-   이미 spt에 user_page가 존재하는 경우는 kernel_virtual_page_in_user_pool로 갱신한다. */
-static void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
-, bool writable){
-  struct supplemental_page_table_entry* spte = vm_spt_lookup(spt, user_page);
-
-  if(spte != NULL){
-    spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
-    spte->frame_data_clue = IN_FRAME;
-    spte->writable = writable;
-    return;
-  }
-
-  /* spt에 아예 존재하지 않는경우는 새로 설치한다.
-     새로운 spt는 오로지 여기서만 생긴다. */
-  spte = (struct supplemental_page_table_entry*) malloc(sizeof(struct supplemental_page_table_entry));
-  spte->user_page = user_page;
-  spte->frame_data_clue = IN_FRAME;
-  spte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
-  spte->writable = writable;
-
-  hash_insert (spt, &spte->elem);
-  return false;
-}
 
 /* Adds a mapping from user virtual address UPAGE to kernel
    virtual address KPAGE to the page table.
@@ -667,6 +643,24 @@ install_page (void *upage, void *kpage, bool writable)
 #ifdef VM
   if(ret)
     vm_spt_install_IN_FRAME_page(&t->spt, upage, kpage, writable);
+#endif
+
+  return ret;
+}
+
+bool
+reinstall_page (void *upage, void *kpage, bool writable)
+{
+  struct thread *t = thread_current ();
+
+  /* Verify that there's not already a page at that virtual
+     address, then map our page there. */
+  bool ret = (pagedir_get_page (t->pagedir, upage) == NULL
+          && pagedir_set_page (t->pagedir, upage, kpage, writable));
+
+#ifdef VM
+  if(ret)
+    vm_spt_set_IN_FRAME_page(&t->spt, upage, kpage, writable);
 #endif
 
   return ret;

@@ -523,7 +523,7 @@ static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, s
 
         //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
         struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
-        if(spte->frame_data_clue == SWAP)
+        if(spte->frame_data_clue == IN_SWAP)
           vm_load_spte_to_user_pool (spte);
 
         //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
