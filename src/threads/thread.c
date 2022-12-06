@@ -502,12 +502,15 @@ init_thread (struct thread *t, const char *name, int priority)
   intr_set_level (old_level);
 #ifdef USERPROG
   //fd 초기화
-  memset(t->fd, NULL, sizeof(t->fd));
+  memset(t->fd, NULL, sizeof(struct file*) * 128);
   //child semaphore 초기화
   sema_init(&(t->exit_sema), 0);
   sema_init(&(t->wait_sema), 0);
   list_init(&(t->child));
   list_push_back(&(running_thread()->child), &(t->child_elem));
+#endif
+#ifdef VM
+  memset(t->mmap_d, NULL, sizeof(struct mmap_descriptor*) * 128);
 #endif
 
   /* pintos manual: recent_cpu, nice는 부모 thread로 부터 상속된 값을 가진다. */

@@ -35,6 +35,13 @@ typedef int tid_t;
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
 
+
+struct mmap_descriptor{
+   struct file* file;
+   void* starting_page;
+};
+
+
 /* A kernel thread or user process. PCB
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -126,6 +133,7 @@ struct thread
 
 #ifdef VM
     struct hash spt;
+    struct mmap_descriptor* mmap_d[128];
 #endif
 
     /* Owned by thread.c. */
