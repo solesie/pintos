@@ -22,6 +22,7 @@
 #include "vm/page.h"
 
 #include "filesys/inode.h"
+#include "threads/malloc.h"
 
 #ifndef VM
 #define vm_frame_allocate(x, y) palloc_get_page(x)
@@ -29,6 +30,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+static void construct_stack(const char* file_name, void** esp);
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -402,7 +404,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   file_close (file);
   return success;
 }
-void construct_stack(char* file_name, void** esp){
+static void construct_stack(const char* file_name, void** esp){
   //argc를 구한다.
   int argc = 0;
   char temp[256];
@@ -554,7 +556,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
 #ifdef VM
-          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          struct supplemental_page_table_entry key;
+          key.kernel_virtual_page_in_user_pool = kpage;
+          key.user_page = upage;
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(&key);
           vm_frame_free(fte);
 #else
           palloc_free_page(kpage);
@@ -569,7 +574,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       if (!install_page (upage, kpage, writable)) 
         {
 #ifdef VM
-          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          struct supplemental_page_table_entry key;
+          key.kernel_virtual_page_in_user_pool = kpage;
+          key.user_page = upage;
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(&key);
           vm_frame_free(fte);
 #else
           palloc_free_page(kpage);
@@ -607,7 +615,10 @@ setup_stack (void **esp)
         *esp = PHYS_BASE;
       else{
 #ifdef VM
-          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(kpage);
+          struct supplemental_page_table_entry key;
+          key.kernel_virtual_page_in_user_pool = kpage;
+          key.user_page = PHYS_BASE - PGSIZE;
+          struct frame_table_entry* fte = vm_frame_lookup_exactly_identical(&key);
           vm_frame_free(fte);
 #else
           palloc_free_page(kpage);
@@ -641,10 +652,11 @@ install_page (void *upage, void *kpage, bool writable)
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
 
 #ifdef VM
-  if(ret)
+  if(ret){
     vm_spt_install_IN_FRAME_page(&t->spt, upage, kpage, writable);
+    pagedir_set_dirty(t->pagedir, kpage, false);
+  }
 #endif
-
   return ret;
 }
 

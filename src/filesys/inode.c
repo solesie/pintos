@@ -7,6 +7,8 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+/* 추후 inode reopen을 호출하도록 어떻게든 수정 */
+
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
@@ -37,6 +39,8 @@ static struct list open_inodes;
 int inodes_list_readcnt;
 struct lock inl_rc_mutex;
 struct semaphore inodes_list_w;
+
+struct lock inode_ref_mutex;
 #endif
 
 
@@ -49,6 +53,7 @@ inode_init (void)
 #ifdef USERPROG
   inodes_list_readcnt = 0;
   lock_init(&inl_rc_mutex);
+  lock_init(&inode_ref_mutex);
   sema_init(&inodes_list_w, 1);
   int sector_num = block_size (fs_device);
   inode_lock = malloc(sizeof(struct lock*)*sector_num);
@@ -136,7 +141,7 @@ inode_open (block_sector_t sector)
       inode = list_entry (e, struct inode, elem);
       if (inode->sector == sector) 
         {
-          inode_reopen (inode);
+          inode->open_cnt++;
 
 #ifdef USERPROG
           lock_release(inode_lock[sector]);
@@ -200,14 +205,18 @@ inode_open (block_sector_t sector)
 }
 
 /* Reopens and returns INODE.
-   이 함수를 통해서만 open_cnt는 늘어날 수 있다.
-   이 함수를 inode_open을 거치지 않고 호출한 경우 inode_close와의 상호교착 가능성에 대해 신경써야 한다.  */
+   이 함수나 inode_open을 통해서만 open_cnt는 늘어날 수 있다. */
 struct inode *
 inode_reopen (struct inode *inode)
 {
-  if (inode != NULL){
-    inode->open_cnt++;
-  }
+  lock_acquire(&inode_ref_mutex);
+  if(inode == NULL) return NULL;
+  block_sector_t sector = inode->sector;
+  lock_release(&inode_ref_mutex);
+
+  lock_acquire(inode_lock[sector]);
+  inode->open_cnt++;
+  lock_release(inode_lock[sector]);
   return inode;
 }
 
