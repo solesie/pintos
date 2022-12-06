@@ -78,45 +78,8 @@ struct frame_table_entry{
     bool is_used_for_user_pointer;
     
     struct vm_ft_hash_elem same_elem;    /* 같은키의 값을 위한 vm_ft_hash_elem */
-
-    // int debug;
 };
 
-// void vm_ft_debug2(struct vm_ft_same_keys* hes){
-//   for(int i = 0; i < hes->len; ++i){
-//     struct frame_table_entry *e = vm_ft_hash_entry (hes->pointers_arr_of_ft_hash_elem[i] , struct frame_table_entry, elem);
-//     printf("%d\n",e->debug);
-//   }
-// }
-
-// void vm_ft_debug(){
-//   struct vm_ft_hash_iterator i;
-//   struct vm_ft_hash vm_ft_frame_table;
-//   vm_ft_hash_init(&vm_ft_frame_table, frame_table_hash_func, frame_table_less_func, frame_table_value_less_func, NULL);
-
-
-//   struct frame_table_entry* fte1 = malloc(sizeof(struct frame_table_entry));
-//   fte1->kernel_virtual_page_in_user_pool = 123;
-//   fte1->user_page = 1;
-//   struct frame_table_entry* fte2 = malloc(sizeof(struct frame_table_entry));
-//   fte2->kernel_virtual_page_in_user_pool = 123;
-//   fte2->user_page = 2;
-//   struct frame_table_entry* fte3 = malloc(sizeof(struct frame_table_entry));
-//   fte3->kernel_virtual_page_in_user_pool = 123;
-//   fte3->user_page = 3;
-//   vm_ft_hash_insert(&vm_ft_frame_table, &fte1->elem);
-//   vm_ft_hash_insert(&vm_ft_frame_table, &fte2->elem);
-//   vm_ft_hash_insert(&vm_ft_frame_table, &fte3->elem);
-
-//   struct vm_ft_hash_elem* e = vm_ft_hash_find_exactly_identical(&vm_ft_frame_table, &fte2->elem);
-//   printf("%d\n\n",vm_ft_hash_entry (e, struct frame_table_entry, elem)->user_page);
-//   vm_ft_hash_delete_exactly_identical(&vm_ft_frame_table, &fte2->elem);
-//   vm_ft_hash_first (&i, &vm_ft_frame_table);
-//   while (vm_ft_hash_next (&i))
-//     {
-//       printf("%d\n",vm_ft_hash_entry(vm_ft_hash_cur(&i), struct frame_table_entry, elem)->user_page);
-//     }
-// }
 
 
 void vm_frame_init(){

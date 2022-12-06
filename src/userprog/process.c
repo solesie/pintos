@@ -451,8 +451,6 @@ static void construct_stack(const char* file_name, void** esp){
   *esp -= 4;
   **(uint32_t**)esp = *esp + 4;
 
-  //[DEBUG] 
-  //printf("%x == %p\n", **(uint32_t**)esp, *esp + 4);
 
   //argc 삽입
   *esp -= 4;
@@ -463,8 +461,6 @@ static void construct_stack(const char* file_name, void** esp){
   **(uint32_t **)esp = 0;
 
   free(argv);
-  //[DEBUG]
-  //hex_dump(*esp, *esp, 100, 1);
 }
 
 /* load() helpers. */
