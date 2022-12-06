@@ -65,6 +65,9 @@ int fibonacci(int n);
 
 int max_of_four_int(int a, int b, int c, int d);
 
+typedef int mmpid_t;
+mmpid_t mmap(int fd, void* user_page);
+void munmap(mmpid_t mapping);
 
 
 #endif /* userprog/syscall.h */

@@ -9,6 +9,7 @@
 #include "threads/palloc.h"
 #include "vm/frame.h"
 #include "userprog/pagedir.h"
+#include "vm/page.h"
 #include "process.h"
 
 /* Number of page faults processed. */
@@ -219,11 +220,18 @@ page_fault (struct intr_frame *f)
   struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, faulted_user_page);
   if(spte != NULL && !is_kernel_vaddr(faulted_user_page) && (not_present || !write)){
     //Call handle_mm_fault
-    if(spte->frame_data_clue == IN_SWAP && vm_load_spte_to_user_pool(spte)){
+    if(spte->frame_data_clue == IN_SWAP && vm_load_IN_SWAP_to_user_pool(spte)){
+      //Restart process
+      return;
+    }
+    if(spte->frame_data_clue == IN_FILE && vm_load_IN_FILE_to_user_pool(spte)){
+      //kernel_virtual_page_in_user_pool으로 접근해서 설치했으므로 dirty bit가 켜진 상태이다.
+      //install_page()때와 마찬가지로 설치했을때는 꺼준다.
       pagedir_set_dirty (t->pagedir, spte->kernel_virtual_page_in_user_pool, false);
       //Restart process
       return;
     }
+
     /* 이 상황 디버그 필요 */
     printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,

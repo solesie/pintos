@@ -4,6 +4,7 @@
 #include "threads/vaddr.h"
 #include "threads/thread.h"
 #include "userprog/pagedir.h"
+#include "threads/malloc.h"
 
 #include "vm/frame-table-hash.h"
 
@@ -169,7 +170,6 @@ static struct vm_ft_same_keys* pick_frame_to_evict(void){
     size_t i; for(i=0; i<=pointer; ++i) vm_ft_hash_next(&it);
 
     struct vm_ft_same_keys* founds = vm_ft_hash_find_same_keys(&frame_table, vm_ft_hash_cur(&it));
-    struct frame_table_entry *e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[0], struct frame_table_entry, elem);
     ASSERT(founds != NULL);
     if(can_be_evicted(founds))
       return founds;
@@ -178,7 +178,7 @@ static struct vm_ft_same_keys* pick_frame_to_evict(void){
 
 
 /* swap.c:vm_swap_out() */
-static void vm_evict_a_frame_to_swap_device(){
+static void vm_evict_a_frame_to_swap_device(void){
   struct vm_ft_same_keys* founds = pick_frame_to_evict();
   //frame table에서 evict할 frame을 모두 없앤다.
   struct vm_ft_same_keys* removed = vm_ft_hash_delete_same_keys (&frame_table, founds->pointers_arr_of_ft_hash_elem[0]);
@@ -190,13 +190,22 @@ static void vm_evict_a_frame_to_swap_device(){
 
   void* kpage = one_of_removed->kernel_virtual_page_in_user_pool;
 
-  for(int i = 0; i < removed->len; ++i){
+  for(int i = 0; i < removed->len; ++i){ //그러나 user pool sharing 구현은 없을 것
     struct frame_table_entry* fte = vm_ft_hash_entry(removed->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
 
     //fte의 정보와 일치하는 spte를 찾아서 갱신한다.
     struct supplemental_page_table_entry* spte = vm_spt_lookup(&fte->t->spt, fte->user_page);
     vm_spt_update_after_swap_out(spte, swap_idx);
 
+    /* alias문제가 발생한다. user data를 kernel space address를 통해서도 접근해왔으므로,
+       pagedir에 access bit, dirty bit가 서로 동기화되어있지 않다.
+       access bit는 random evict algorithm을 적용했으므로 상관 쓸 필요가 없지만,
+       dirty bit는 mmap시 정확한 정보가 필요하다. 
+       둘중 하나라도 수정된 상황이면 수정했다고 여기고 수정했다는 정확한 정보를 저장한다. */
+    pagedir_set_dirty(fte->t->pagedir, fte->user_page
+      , pagedir_is_dirty(fte->t->pagedir, fte->user_page) || pagedir_is_dirty(fte->t->pagedir, fte->kernel_virtual_page_in_user_pool));
+    pagedir_set_dirty(fte->t->pagedir, fte->kernel_virtual_page_in_user_pool, false);
+    
     //pagedir에서 present bit 갱신
     pagedir_clear_page(fte->t->pagedir, fte->user_page);
     free(fte);

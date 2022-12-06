@@ -16,13 +16,22 @@
 
 static void syscall_handler (struct intr_frame *);
 
+static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes);
+static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes);
+static void unmake(void* user_pointer_inclusive, size_t bytes);
+
 void exit (int status){
   printf("%s: exit(%d)\n", thread_name(), status);
   thread_current() -> exit_status = status;
-  for (int i = 3; i < 128; i++) {
-      if (thread_current()->fd[i] != NULL) {
-          close(i);
-      }   
+  for (int i = 3; i < 128; ++i) {
+    if (thread_current()->fd[i] != NULL) {
+      close(i);
+    }
+  }
+  for(int i = 0; i <128; ++i){
+    if (thread_current()->mmap_d[i] != NULL) {
+      munmap(i);
+    }
   }
   thread_exit ();
 }
@@ -173,12 +182,82 @@ int max_of_four_int(int a, int b, int c, int d){
   return max;
 }
 
+/* 4.3.4) file_open으로 연 fd를 user_page부터 연속하는 page로 매핑시킨다.
+   성공시, 프로세스마다 따로 가지는 mapping ID를 반환한다.
+   실패시, -1을 반환한다. 이때 아무런 변화가 없어야한다. */
+mmpid_t mmap(int fd, void* user_page){
+  //fd가 0,1인경우 실패한다.
+  if(fd <= 1 || fd >= 128) return -1;
 
+  //user_page = 0x0인 경우 실패한다.
+  if(user_page == NULL) return -1;
 
-void
-syscall_init (void) 
-{
-  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+  //user_page가 page-aligned가 아니라면 실패한다.
+  if(pg_ofs(user_page) != 0) return -1;
+
+  struct thread* cur = thread_current();
+  struct file* f = cur->fd[fd];
+  off_t file_bytes;
+  if(f == NULL) return -1;
+  //fd를 열었을 때 파일 길이가 0이면 실패한다.
+  file_bytes = file_length(f);
+  if(file_bytes == 0) return -1;
+
+  for (off_t i = 0; i < file_bytes; i += PGSIZE) {
+    void *user_page_aligned = user_page + i;
+    //이미 존재하는 매핑된 페이지들을 덮어씌우려고 할경우 실패한다.
+    if(is_kernel_vaddr(user_page_aligned)) return -1;
+    if(vm_spt_lookup(&cur->spt, user_page_aligned) != NULL) return -1;
+  }
+
+  mmpid_t ret; //test code weird...?
+  for(ret = 0; ret < 128; ++ret)
+    if(cur->mmap_d[ret] == NULL)
+      break;
+  if(ret == 128) return -1;
+
+  /* file_close(fd), file_remove(fd_name)은 이 mmap에 아무런 영향을 주지 않아야한다.
+     한번 mmap되면, munmap이나 exit될때 까지는 항상 유효해야한다(Unix convention).
+     
+     그리고 서로다른 user program에서 똑같은 파일을 mmap시, sharing은 PintOs에선 요구되지 않는다.
+     (동일한 file table을 보지 않아도 된다는 뜻인듯 하다)
+     
+     같은 inode를 참조하는 file table 두개가 생성되는 상황이다. */
+  f = file_reopen(f);
+  cur->mmap_d[ret] = malloc(sizeof(struct mmap_descriptor));
+  cur->mmap_d[ret]->file = f;
+  cur->mmap_d[ret]->starting_page = user_page;
+
+  /* spt에 데이터를 적는다. */
+  for (off_t i = 0; i < file_bytes; i += PGSIZE) {
+    void *user_page_aligned = user_page + i;
+
+    size_t read_bytes = (i + PGSIZE < file_bytes ? PGSIZE : file_bytes - i);
+    size_t zero_bytes = PGSIZE - read_bytes;//final mapped page sticked out beyond the EOF.(나중에 기록할때 버린다)
+
+    vm_spt_install_IN_FILE_page(&cur->spt, user_page_aligned, f, i, read_bytes, zero_bytes, true);
+  }
+  
+  return ret;
+}
+
+void munmap(mmpid_t mapping){
+  struct thread* cur = thread_current();
+  
+  if(mapping < 0 || mapping >=128 || cur->mmap_d[mapping] == NULL)
+    exit(-1);
+
+  off_t file_bytes = file_length(cur->mmap_d[mapping]->file);
+  for(off_t i = 0; i < file_bytes; i += PGSIZE){
+    void* user_page_aligned = cur->mmap_d[mapping]->starting_page + i;
+    struct supplemental_page_table_entry* spte = vm_spt_lookup(&cur->spt, user_page_aligned);
+    make_user_pointer_in_physical_memory(user_page_aligned, PGSIZE);
+    vm_save_IN_FRAME_to_file(cur, spte);
+  }
+
+  file_close(cur->mmap_d[mapping]->file);
+  free(cur->mmap_d[mapping]);
+  cur->mmap_d[mapping] = NULL;
 }
 
 
@@ -188,11 +267,12 @@ syscall_init (void)
 
 
 
+void
+syscall_init (void) 
+{
+  intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
 
-
-static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes);
-static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes);
-static void unmake(void* user_pointer_inclusive, size_t bytes);
 
 static void
 syscall_handler (struct intr_frame *f UNUSED) 
@@ -478,6 +558,32 @@ syscall_handler (struct intr_frame *f UNUSED)
 			  *(int*)(f->esp+12), *(int*)(f->esp+16));
       break;
     }
+
+    case SYS_MMAP: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(void*)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+      make_user_pointer_in_physical_memory(f->esp + 8, sizeof(void*));
+
+      f->eax = mmap(*(int*)(f->esp + 4), (void*)*(uint32_t*)(f->esp + 8));
+
+      unmake(f->esp + 4, sizeof(int));
+      unmake(f->esp + 8, sizeof(void*));
+      break;
+    }
+
+    case SYS_MUNMAP: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+
+      munmap(*(int*)(f->esp + 4));
+
+      unmake(f->esp + 4, sizeof(int));
+      break;
+    }
+
   }
 
 }
@@ -524,7 +630,9 @@ static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, s
         //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
         struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
         if(spte->frame_data_clue == IN_SWAP)
-          vm_load_spte_to_user_pool (spte);
+          vm_load_IN_SWAP_to_user_pool (spte);
+        if(spte->frame_data_clue == IN_FILE)
+          vm_load_IN_FILE_to_user_pool(spte);
 
         //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
         struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 

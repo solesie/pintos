@@ -4,6 +4,7 @@
 #include <hash.h>
 #include "vm/swap.h"
 #include "filesys/off_t.h"
+#include "threads/thread.h"
 
 enum clue_of_frame_data{
     IN_SWAP,        /* swap disk에 존재한다. */
@@ -41,21 +42,26 @@ struct supplemental_page_table_entry{
     size_t swap_slot;                                /* frame이 swap_device에 존재하는 경우 어느 슬롯에 잇는가 */
 
     // mmap
-    bool dirty;
-    struct file *file;
+    struct file* file;
     off_t file_offset;
     uint32_t read_bytes, zero_bytes;
 };
 
 void vm_spt_create(struct hash*);
 void vm_spt_destroy (struct hash* spt);
-
 struct supplemental_page_table_entry* vm_spt_lookup(struct hash*, void*);
+
 void vm_spt_update_after_swap_out(struct supplemental_page_table_entry* spte, size_t swap_slot);
+bool vm_load_IN_SWAP_to_user_pool(struct supplemental_page_table_entry* spte);
+bool vm_load_IN_FILE_to_user_pool(struct supplemental_page_table_entry* spte);
+
+bool vm_save_IN_FRAME_to_file(struct thread* t, struct supplemental_page_table_entry* spte);
 
 void vm_spt_set_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
 , bool writable);
 void vm_spt_install_IN_FRAME_page(struct hash* spt, void* user_page, void* kernel_virtual_page_in_user_pool
 , bool writable);
+void vm_spt_install_IN_FILE_page (struct hash *spt, void *user_page
+, struct file * f, off_t offset, uint32_t read_bytes, uint32_t zero_bytes, bool writable);
 
 #endif /* vm/page.h */
