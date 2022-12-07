@@ -210,7 +210,7 @@ mmpid_t mmap(int fd, void* user_page){
     if(vm_spt_lookup(&cur->spt, user_page_aligned) != NULL) return -1;
   }
 
-  mmpid_t ret; //test code weird...?
+  mmpid_t ret;
   for(ret = 0; ret < 128; ++ret)
     if(cur->mmap_d[ret] == NULL)
       break;
