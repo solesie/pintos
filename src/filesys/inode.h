@@ -12,14 +12,31 @@
 
 struct bitmap;
 
+#define NUM_DIRECT_BLOCKS 123
+#define NUM_POINTER_BLOCKS 128
 /* On-disk inode.
-   Must be exactly BLOCK_SECTOR_SIZE bytes long. */
+   Must be exactly BLOCK_SECTOR_SIZE bytes long.
+
+   기존의 start 부터 length(size)만큼 저장되어있다고 알리는 continuous 구조에서
+   indexed inode 구조로 바꾼다. 
+   
+   is_dir, length, magic: 12 bytes
+   direct_blocks: 123 * 4 bytes
+   indirect_block: 4 bytes
+   doubly_indirect_block: 4bytes
+   ==> 512 bytes = BLOCK_SECTOR_SIZE bytes long
+
+   이 파일 시스템이 나타낼 수 있는 파일의 최대 크기(5.3.2에 따르면 8MB여야 한다)
+   : 123*512 bytes + 128*512 bytes + 128*128*512 bytes = 8388618 bytes = 8MB */
 struct inode_disk
   {
-    block_sector_t start;               /* First data sector. */
+    block_sector_t direct_blocks[NUM_DIRECT_BLOCKS];
+    block_sector_t indirect_block;
+    block_sector_t doubly_indirect_block;
+
     off_t length;                       /* File size in bytes. */
     unsigned magic;                     /* Magic number. */
-    uint32_t unused[125];               /* Not used. */
+    int is_dir;                         /* is dirctory inode(1 : true, 0: false) */
   };
 
 /* In-memory inode. */
