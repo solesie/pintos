@@ -7,6 +7,8 @@
 #include "filesys/free-map.h"
 #include "threads/malloc.h"
 
+#include "filesys/cache.h"
+
 /* 추후 inode reopen을 호출하도록 어떻게든 수정 */
 
 /* Identifies an inode. */
@@ -132,7 +134,7 @@ inode_open (block_sector_t sector)
   lock_acquire(&inl_rc_mutex);
   ++inodes_list_readcnt;
   if(inodes_list_readcnt == 1)
-    sema_up(&inodes_list_w);
+    sema_down(&inodes_list_w);
   lock_release(&inl_rc_mutex);
 #endif
   for (e = list_begin (&open_inodes); e != list_end (&open_inodes);
@@ -148,7 +150,7 @@ inode_open (block_sector_t sector)
           lock_acquire(&inl_rc_mutex);
           --inodes_list_readcnt;
           if(inodes_list_readcnt == 0)
-            sema_down(&inodes_list_w);
+            sema_up(&inodes_list_w);
           lock_release(&inl_rc_mutex);
 #endif
 
@@ -160,7 +162,7 @@ inode_open (block_sector_t sector)
   lock_acquire(&inl_rc_mutex);
   --inodes_list_readcnt;
   if(inodes_list_readcnt == 0)
-    sema_down(&inodes_list_w);
+    sema_up(&inodes_list_w);
   lock_release(&inl_rc_mutex);
 #endif
 
@@ -177,11 +179,11 @@ inode_open (block_sector_t sector)
 
   /* Initialize. */
 #ifdef USERPROG
-  sema_up(&inodes_list_w); //list_push 는 list에 writing 하는 상황이다.
+  sema_down(&inodes_list_w); //list_push 는 list에 writing 하는 상황이다.
 #endif
   list_push_front (&open_inodes, &inode->elem);
 #ifdef USERPROG
-  sema_down(&inodes_list_w);
+  sema_up(&inodes_list_w);
 #endif
   inode->sector = sector;
   inode->open_cnt = 1;
@@ -250,9 +252,9 @@ inode_close (struct inode *inode)
     {
       /* Remove from inode list and release lock. inodes_list에 writing 하는 상황이다. */
 #ifdef USERPROG
-      sema_up(&inodes_list_w);
-      list_remove (&inode->elem);
       sema_down(&inodes_list_w);
+      list_remove (&inode->elem);
+      sema_up(&inodes_list_w);
 #endif
 
       /* Deallocate blocks if removed. */
@@ -326,7 +328,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
           block_read (fs_device, sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
         }
-      
+
       /* Advance. */
       size -= chunk_size;
       offset += chunk_size;
@@ -372,7 +374,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       int chunk_size = size < min_left ? size : min_left;
       if (chunk_size <= 0)
         break;
-
+        
       if (sector_ofs == 0 && chunk_size == BLOCK_SECTOR_SIZE)
         {
           /* Write full sector directly to disk. */

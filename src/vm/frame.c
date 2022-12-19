@@ -36,8 +36,10 @@
               <PintOs Physical memory(64mb)>                                  <PintOs Virtual memory(4GB)> */
 static struct vm_ft_hash frame_table;
 
-/* lock for frame_table */
-static struct lock frame_table_lock;
+/* reader-writers for frame_table */
+static struct semaphore frame_table_w;
+static int read_cnt;
+static struct lock mutex;
 
 static unsigned frame_table_hash_func(const struct vm_ft_hash_elem* e, void* aux);
 static bool frame_table_less_func(const struct vm_ft_hash_elem* a, const struct vm_ft_hash_elem* b, void* aux);
@@ -83,28 +85,57 @@ struct frame_table_entry{
 
 
 void vm_frame_init(){
-  // vm_ft_debug();
   lock_init(&frame_table_lock);
+
+  lock_init(&mutex);
+  sema_init(&frame_table_w, 1);
+  read_cnt = 0;
+
   vm_ft_hash_init(&frame_table, frame_table_hash_func, frame_table_less_func, frame_table_value_less_func, NULL);
 }
 
 /* 이 함수 사용후 반환값을 vm_ft_same_keys_free를 통해 해제해야 한다. */
 struct vm_ft_same_keys* vm_frame_lookup_same_keys(void* kernel_virtual_page_in_user_pool){
+  lock_acquire(&mutex);
+  ++read_cnt;
+  if(read_cnt == 1)
+    sema_down(&frame_table_w);
+  lock_release(&mutex);
+
   struct frame_table_entry key;
   key.kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool;
   struct vm_ft_same_keys* founds = vm_ft_hash_find_same_keys(&frame_table, &(key.elem));
+
+  lock_acquire(&mutex);
+  --read_cnt;
+  if(read_cnt == 0)
+    sema_up(&frame_table_w);
+  lock_release(&mutex);
   return founds;
 }
 
 
 /* 정확히 spte의 내용과 일치하는 frame_table_entry 하나를 반환한다. */
 struct frame_table_entry* vm_frame_lookup_exactly_identical(struct supplemental_page_table_entry* spte){
+  lock_acquire(&mutex);
+  ++read_cnt;
+  if(read_cnt == 1)
+    sema_down(&frame_table_w);
+  lock_release(&mutex);
+
   ASSERT(spte->frame_data_clue == IN_FRAME);
   struct frame_table_entry key;
   key.kernel_virtual_page_in_user_pool = spte->kernel_virtual_page_in_user_pool;
   key.user_page = spte->user_page;
   struct vm_ft_hash_elem* e = vm_ft_hash_find_exactly_identical(&frame_table, &(key.elem));
-  return vm_ft_hash_entry(e, struct frame_table_entry, elem);
+  struct frame_table_entry* ret = vm_ft_hash_entry(e, struct frame_table_entry, elem);
+
+  lock_acquire(&mutex);
+  --read_cnt;
+  if(read_cnt == 0)
+    sema_up(&frame_table_w);
+  lock_release(&mutex);
+  return ret;
 }
 
 
@@ -218,11 +249,12 @@ static void vm_add_fte(void* kernel_virtual_page_in_user_pool, void* user_page){
    
    즉, palloc으로 받은 프레임으로 사용을 완료할 때 까지는 절대로 eviction되면 안된다. */
 void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
-  lock_acquire(&frame_table_lock);
-  void* kernel_virtual_page_in_user_pool = vm_super_palloc_get_page(flags);
+  sema_down(&frame_table_w);
 
+  void* kernel_virtual_page_in_user_pool = vm_super_palloc_get_page(flags);
   vm_add_fte(kernel_virtual_page_in_user_pool, user_page);
-  lock_release(&frame_table_lock);
+
+  sema_up(&frame_table_w);
   return kernel_virtual_page_in_user_pool;
 }
 
@@ -231,9 +263,13 @@ void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
    fte가 나타내는 frame을 deallocate한다.
    그리고 fte와 정확히 일치하는 데이터를 frame table에서 없앤다. */
 void vm_frame_free (struct frame_table_entry* fte){
-  lock_acquire(&frame_table_lock);
+  sema_down(&frame_table_w);
+  
+  /* same as vm_frame_lookup_same_keys() */
+  struct frame_table_entry key;
+  key.kernel_virtual_page_in_user_pool = fte->kernel_virtual_page_in_user_pool;
+  struct vm_ft_same_keys* others = vm_ft_hash_find_same_keys(&frame_table, &(key.elem));
 
-  struct vm_ft_same_keys* others = vm_frame_lookup_same_keys(fte->kernel_virtual_page_in_user_pool);
   ASSERT(others != NULL);
   if(others->len == 1)//no sharing
     palloc_free_page(fte->kernel_virtual_page_in_user_pool);
@@ -242,7 +278,7 @@ void vm_frame_free (struct frame_table_entry* fte){
   vm_ft_same_keys_free(others);
   free(fte);
 
-  lock_release(&frame_table_lock);
+  sema_up(&frame_table_w);
 }
 
 
@@ -250,21 +286,25 @@ void vm_frame_free (struct frame_table_entry* fte){
    이때 frame_table에서는 따로 지워주어야한다.
    fte의 정보와 정확히 일치하는 데이터를 frame_table에서 없애고 fte를 deallocate한다. */
 void vm_frame_free_only_in_ft(struct frame_table_entry* fte){
-  lock_acquire(&frame_table_lock);
+  sema_down(&frame_table_w);
+
   vm_ft_hash_delete_exactly_identical (&frame_table, &fte->elem);
   free(fte);
-  lock_release(&frame_table_lock);
+
+  sema_up(&frame_table_w);
 }
 
 
 /* setter */
 void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value){
-  lock_acquire(&frame_table_lock);
+  sema_down(&frame_table_w);
+
   for(int i = 0; i < founds->len; ++i){
     struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
     fte->is_used_for_user_pointer = value;
   }
-  lock_release(&frame_table_lock);
+
+  sema_up(&frame_table_w);
 }
 
 

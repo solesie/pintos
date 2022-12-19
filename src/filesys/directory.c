@@ -188,8 +188,16 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
 #endif
 
   /* Check that NAME is not in use. */
-  if (lookup (dir, name, NULL, NULL))
+  if (lookup (dir, name, NULL, NULL)){
+#ifdef USERPROG
+    lock_acquire(&(dir->inode->inode_readcnt_mutex));
+    --dir->inode->read_cnt;
+    if(dir->inode->read_cnt == 0)
+      sema_up(&(dir->inode->w));
+    lock_release(&(dir->inode->inode_readcnt_mutex));
+#endif
     goto done;
+  }
 
   /* Set OFS to offset of free slot.
      If there are no free slots, then it will be set to the
