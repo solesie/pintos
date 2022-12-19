@@ -85,8 +85,6 @@ struct frame_table_entry{
 
 
 void vm_frame_init(){
-  lock_init(&frame_table_lock);
-
   lock_init(&mutex);
   sema_init(&frame_table_w, 1);
   read_cnt = 0;
