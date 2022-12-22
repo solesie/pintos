@@ -77,7 +77,9 @@ struct frame_table_entry{
 
        즉, 커널이 read, write syscall로 file_read, file_write로 fs device와 데이터를 주고받을때 
        커널은 page fault를 해결하는데 필요한 리소스를 보유하고 있다. 이때 page fault를 방지해야한다. */
-    bool is_used_for_user_pointer;
+    int is_used_for_user_pointer;
+
+    bool setting_now;
     
     struct vm_ft_hash_elem same_elem;    /* 같은키의 값을 위한 vm_ft_hash_elem */
 };
@@ -140,7 +142,7 @@ struct frame_table_entry* vm_frame_lookup_exactly_identical(struct supplemental_
 static bool can_be_evicted(struct vm_ft_same_keys* founds){
   for(int i = 0; i < founds->len; ++i){
       struct frame_table_entry *e = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
-      if(e->is_used_for_user_pointer)
+      if(e->is_used_for_user_pointer > 0 || e->setting_now)
         return false;
   }
   return true;
@@ -226,7 +228,8 @@ static void vm_add_fte(void* kernel_virtual_page_in_user_pool, void* user_page){
   fte->user_page = user_page;
   fte->kernel_virtual_page_in_user_pool = kernel_virtual_page_in_user_pool; /* 실제로 physical memory에도 반영하는 코드는...??
                                                                                threads/start.S 참조. */
-  fte->is_used_for_user_pointer = false;
+  fte->is_used_for_user_pointer = 0;
+  fte->setting_now = true;
 
   vm_ft_hash_insert (&frame_table, &fte->elem);
 }
@@ -299,12 +302,30 @@ void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value){
 
   for(int i = 0; i < founds->len; ++i){
     struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
-    fte->is_used_for_user_pointer = value;
+    ASSERT(fte->is_used_for_user_pointer >= 0);
+    if(value)
+      ++fte->is_used_for_user_pointer;
+    else if(!value && fte->is_used_for_user_pointer > 0)
+      --fte->is_used_for_user_pointer;
   }
 
   sema_up(&frame_table_w);
 }
 
+/* vm_frame_allocate(),
+   vm_load_IN_FILE_to_user_pool,
+   vm_load_IN_SWAP_to_user_pool 는 새로운 프레임을 할당한다.
+   새로운 프레임에 대한 설정이 완료(= evict해도 된다는 의미)되면 이 함수를 호출한다. */
+void vm_frame_setting_over(struct vm_ft_same_keys* founds){
+  sema_down(&frame_table_w);
+
+  for(int i = 0; i < founds->len; ++i){
+    struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
+    fte->setting_now = false;
+  }
+
+  sema_up(&frame_table_w);
+}
 
 /* hash function들 */
 static unsigned frame_table_hash_func(const struct vm_ft_hash_elem *e, void* aux UNUSED)

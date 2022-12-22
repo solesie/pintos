@@ -13,6 +13,7 @@
 #include "vm/page.h"
 #include "userprog/pagedir.h"
 #include "vm/frame.h"
+#include "filesys/cache.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -114,9 +115,9 @@ int write (int fd, const void* buffer, unsigned size){
     if (cur_process->fd[fd] == NULL) {
       exit(-1);
     }
-    //preload_and_pin_pages(buffer,size);
+
     ret = file_write(cur_process->fd[fd], buffer, size);
-    //unpin_preloaded_pages(buffer,size);
+
   } else{
     return 0;
   }
@@ -128,7 +129,7 @@ bool create(const char* file, unsigned initial_size){
   if (file == NULL) {
       exit(-1);
   }
-  return filesys_create(file, initial_size);
+  return filesys_create(file, initial_size, 0);
 }
 
 bool remove(const char* file){
@@ -224,6 +225,8 @@ mmpid_t mmap(int fd, void* user_page){
      
      같은 inode를 참조하는 file table 두개가 생성되는 상황이다. */
   f = file_reopen(f);
+  if(f == NULL) return -1;
+
   cur->mmap_d[ret] = malloc(sizeof(struct mmap_descriptor));
   cur->mmap_d[ret]->file = f;
   cur->mmap_d[ret]->starting_page = user_page;
@@ -629,15 +632,29 @@ static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, s
 
         //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
         struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
-        if(spte->frame_data_clue == IN_SWAP)
+        bool newly_allocated = false;
+        if(spte->frame_data_clue == IN_SWAP){
           vm_load_IN_SWAP_to_user_pool (spte);
-        if(spte->frame_data_clue == IN_FILE)
+          newly_allocated = true;
+        }
+        if(spte->frame_data_clue == IN_FILE){
           vm_load_IN_FILE_to_user_pool(spte);
+          newly_allocated = true;
+        }
+
+/*
+ * critical section 여전히 존재...
+ * 이 타이밍에 IN_SWAP이 되지 않을 것이라 장담할 수가 없음.
+ * frame number로 배열을 만들어서 lock을 잡아 해결 가능할 듯 하다(TODO LATER,,,시간없어서 못할듯).
+ */
 
         //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
         struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
         vm_frame_set_for_user_pointer(founds, true);
         vm_ft_same_keys_free(founds);
+
+        if(newly_allocated)
+          vm_frame_setting_over(vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool));
       }
   }
 }

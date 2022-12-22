@@ -581,6 +581,10 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           return false; 
         }
 
+#ifdef VM
+      vm_frame_setting_over(vm_frame_lookup_same_keys(kpage));
+#endif
+
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
@@ -607,8 +611,12 @@ setup_stack (void **esp)
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
+      if (success){
         *esp = PHYS_BASE;
+#ifdef VM
+        vm_frame_setting_over(vm_frame_lookup_same_keys(kpage));
+#endif
+      }
       else{
 #ifdef VM
           struct supplemental_page_table_entry key;

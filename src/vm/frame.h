@@ -17,5 +17,6 @@ struct frame_table_entry* vm_frame_lookup_exactly_identical(struct supplemental_
 struct vm_ft_same_keys* vm_frame_lookup_same_keys(void* kernel_virtual_page_in_user_pool);
 
 void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value);
+void vm_frame_setting_over(struct vm_ft_same_keys* founds);
 
 #endif /* vm/frame.h */
