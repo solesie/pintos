@@ -14,6 +14,7 @@ struct bitmap;
 
 #define NUM_DIRECT_BLOCKS 123
 #define NUM_POINTER_BLOCKS 128
+#define MAX_FILE_LENGTH 8388618
 /* On-disk inode.
    Must be exactly BLOCK_SECTOR_SIZE bytes long.
 
@@ -57,7 +58,7 @@ struct inode
   };
 
 void inode_init (void);
-bool inode_create (block_sector_t, off_t, block_sector_t*);
+bool inode_create (block_sector_t, off_t, int);
 struct inode *inode_open (block_sector_t);
 struct inode *inode_reopen (struct inode *);
 block_sector_t inode_get_inumber (const struct inode *);

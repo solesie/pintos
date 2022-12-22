@@ -49,7 +49,7 @@ filesys_done (void)
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size) 
+filesys_create (const char *name, off_t initial_size, int is_dir) 
 {
   block_sector_t inode_sector = 0;
   bool inode_freed = false;
@@ -59,14 +59,12 @@ filesys_create (const char *name, off_t initial_size)
   struct dir *dir = dir_open_root (); //아직까지 루트 디렉토리에만 생성이 가능하다.
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector) //빈 섹터를 찾고
-                  && inode_create (inode_sector, initial_size, &data_sector) //섹터에 file의 inode를 만들고, 파일을 섹터에 할당하고
+                  && inode_create (inode_sector, initial_size, is_dir) //섹터에 file의 inode를 만들고, 파일을 섹터에 할당하고
                   && dir_add (dir, name, inode_sector)); //name이 이미 존재하는지 확인한다. 없으면 기록한다.
   if (!success){
     if(inode_sector != 0) //free_map_allocate(1, ) 에서 할당된 부분을 해제한다.
       free_map_release (inode_sector, 1);
 #ifdef USERPROG
-    if(data_sector != 0) //inode_create()의 free_map_allocated() 에서 할당된 부분을 해제한다.
-      free_map_release (data_sector, bytes_to_sectors (initial_size));
     if(dir != NULL) //dir_open_root에서 늘어난 dir->inode->open_cnt 를 줄인다.
       inode_freed = inode_close(dir_get_inode(dir));
     if(inode_freed) //만약 dir->inode가 free 되었다면 dir도 free 한다.
