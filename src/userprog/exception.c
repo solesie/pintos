@@ -126,7 +126,9 @@ static bool grow_user_stack(void* faulted_page){
     PANIC("install_page 에러");
     exit(-1);
   }
-  vm_frame_setting_over(vm_frame_lookup_same_keys(kernel_virtual_page_in_user_pool));
+  struct vm_ft_same_keys * founds = vm_frame_lookup_same_keys(kernel_virtual_page_in_user_pool);
+  vm_frame_setting_over(founds);
+  vm_ft_same_keys_free(founds);
 
   return true;
 }
@@ -223,7 +225,9 @@ page_fault (struct intr_frame *f)
     //Call handle_mm_fault
     if(spte->frame_data_clue == IN_SWAP && vm_load_IN_SWAP_to_user_pool(spte)){
       //Restart process
-      vm_frame_setting_over(vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool));
+      struct vm_ft_same_keys * founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool);
+      vm_frame_setting_over(founds);
+      vm_ft_same_keys_free(founds);
       return;
     }
     if(spte->frame_data_clue == IN_FILE && vm_load_IN_FILE_to_user_pool(spte)){
@@ -231,7 +235,9 @@ page_fault (struct intr_frame *f)
       //install_page()때와 마찬가지로 설치했을때는 꺼준다.
       pagedir_set_dirty (t->pagedir, spte->kernel_virtual_page_in_user_pool, false);
       //Restart process
-      vm_frame_setting_over(vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool));
+      struct vm_ft_same_keys * founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool);
+      vm_frame_setting_over(founds);
+      vm_ft_same_keys_free(founds);
       return;
     }
 

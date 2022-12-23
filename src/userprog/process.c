@@ -582,7 +582,9 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
         }
 
 #ifdef VM
-      vm_frame_setting_over(vm_frame_lookup_same_keys(kpage));
+      struct vm_ft_same_keys * founds = vm_frame_lookup_same_keys(kpage);
+      vm_frame_setting_over(founds);
+      vm_ft_same_keys_free(founds);
 #endif
 
       /* Advance. */
@@ -614,7 +616,9 @@ setup_stack (void **esp)
       if (success){
         *esp = PHYS_BASE;
 #ifdef VM
-        vm_frame_setting_over(vm_frame_lookup_same_keys(kpage));
+        struct vm_ft_same_keys * founds = vm_frame_lookup_same_keys(kpage);
+        vm_frame_setting_over(founds);
+        vm_ft_same_keys_free(founds);
 #endif
       }
       else{
