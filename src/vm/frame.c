@@ -36,10 +36,15 @@
               <PintOs Physical memory(64mb)>                                  <PintOs Virtual memory(4GB)> */
 static struct vm_ft_hash frame_table;
 
-/* reader-writers for frame_table */
+/* reader-writers for frame_table
+
+   x frame을 swap out이 안되게 고정하는 도중에 x frame이 swap out이 일어나면 안된다.
+   frame number을 이용한 배열을 만들어서 frame 마다 lock을 잡으면 성능상 더 빠를수도 있다.
+   그러나 시간상의 문제로 이는 구현하지 않는다. 대신 frame_table_w를 사용한다. */
 static struct semaphore frame_table_w;
 static int read_cnt;
 static struct lock mutex;
+
 
 static unsigned frame_table_hash_func(const struct vm_ft_hash_elem* e, void* aux);
 static bool frame_table_less_func(const struct vm_ft_hash_elem* a, const struct vm_ft_hash_elem* b, void* aux);
@@ -80,8 +85,6 @@ struct frame_table_entry{
     int is_used_for_user_pointer;
 
     bool setting_now;
-    
-    struct vm_ft_hash_elem same_elem;    /* 같은키의 값을 위한 vm_ft_hash_elem */
 };
 
 
@@ -259,6 +262,13 @@ void* vm_frame_allocate (enum palloc_flags flags, void* user_page){
   return kernel_virtual_page_in_user_pool;
 }
 
+/* ONLY USE IN vm_load_IN_SWAP_to_user_pool(), vm_load_IN_FILE_to_user_pool() */
+static void* vm_frame_allocate_unsafe (enum palloc_flags flags, void* user_page){
+  void* kernel_virtual_page_in_user_pool = vm_super_palloc_get_page(flags);
+  vm_add_fte(kernel_virtual_page_in_user_pool, user_page);
+  return kernel_virtual_page_in_user_pool;
+}
+
 
 /* 만약 fte->kernel_virtual_page_in_user_pool이 frame table에서 유일하다면,
    fte가 나타내는 frame을 deallocate한다.
@@ -297,9 +307,7 @@ void vm_frame_free_only_in_ft(struct frame_table_entry* fte){
 
 
 /* setter */
-void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value){
-  sema_down(&frame_table_w);
-
+static void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value){
   for(int i = 0; i < founds->len; ++i){
     struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
     ASSERT(fte->is_used_for_user_pointer >= 0);
@@ -308,8 +316,6 @@ void vm_frame_set_for_user_pointer(struct vm_ft_same_keys* founds, bool value){
     else if(!value && fte->is_used_for_user_pointer > 0)
       --fte->is_used_for_user_pointer;
   }
-
-  sema_up(&frame_table_w);
 }
 
 /* vm_frame_allocate(),
@@ -326,6 +332,108 @@ void vm_frame_setting_over(struct vm_ft_same_keys* founds){
 
   sema_up(&frame_table_w);
 }
+
+
+/* 4.3.5) user_pointer_inclusive부터 bytes만큼 physical memory에 고정시킨다.
+   BLOCK_FILESYS, BLOCK_SWAP 와 같은 block device를 컨트롤하는 block device driver가 있다.
+   BLOCK_FILESYS에서 block_read(), block_write()를 호출하는 도중에 page_fault()가 발생하여
+   BLOCK_SWAP에서 block_read(), block_write()를 호출하는 상황이 발생하면 안된다.
+   
+   user_pointer_inclusive 부터 bytes까지 swap device에 존재하는 페이지는 physical memory로 데려온다.
+   use in syscall.c */
+void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes){
+  struct thread* t = thread_current();
+  
+  void* new_page = NULL;
+  for(size_t i = 0; i < bytes; ++i){
+      //페이지가 달라진 경우
+      if(new_page != pg_round_down(user_pointer_inclusive + i)){
+        //advanced
+        new_page = pg_round_down(user_pointer_inclusive + i);
+
+sema_down(&frame_table_w);
+
+        /* 이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다. */
+        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
+        bool newly_allocated = false;
+
+
+        if(spte->frame_data_clue == IN_SWAP){
+
+          // same mechanism as  vm_load_IN_SWAP_to_user_pool (spte);
+          void* kernel_virtual_page_in_user_pool = vm_frame_allocate_unsafe(PAL_USER, spte -> user_page);
+          ASSERT(kernel_virtual_page_in_user_pool != NULL);
+          vm_swap_in(spte->swap_slot, kernel_virtual_page_in_user_pool);
+          ASSERT(reinstall_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable));
+          // vm_load_IN_SWAP_to_user_pool (spte) over
+
+          newly_allocated = true;
+        }
+
+
+        if(spte->frame_data_clue == IN_FILE){
+
+          // same mechanism as vm_load_IN_FILE_to_user_pool(spte);
+          void* kernel_virtual_page_in_user_pool = vm_frame_allocate_unsafe(PAL_USER, spte -> user_page);
+          ASSERT(kernel_virtual_page_in_user_pool != NULL);
+          file_seek(spte->file, spte->file_offset);
+          int read_bytes = file_read (spte->file, kernel_virtual_page_in_user_pool, spte->read_bytes);
+          ASSERT(read_bytes == spte->read_bytes);
+          ASSERT (spte->read_bytes + spte->zero_bytes == PGSIZE);
+          memset (kernel_virtual_page_in_user_pool + read_bytes, 0, spte->zero_bytes);
+          ASSERT(reinstall_page(spte->user_page, kernel_virtual_page_in_user_pool, spte->writable));
+          // vm_load_IN_FILE_to_user_pool(spte) over
+
+          newly_allocated = true;
+        }
+
+
+        /* 이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다. */
+        //same as vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
+        struct frame_table_entry key;
+        key.kernel_virtual_page_in_user_pool = spte->kernel_virtual_page_in_user_pool;
+        struct vm_ft_same_keys* founds = vm_ft_hash_find_same_keys(&frame_table, &(key.elem));
+
+        vm_frame_set_for_user_pointer(founds, true);
+        vm_ft_same_keys_free(founds);
+
+        // same as vm_frame_setting_over(vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool));
+        key.kernel_virtual_page_in_user_pool = spte->kernel_virtual_page_in_user_pool;
+        founds = vm_ft_hash_find_same_keys(&frame_table, &(key.elem));
+        for(int i = 0; i < founds->len; ++i){
+          struct frame_table_entry* fte = vm_ft_hash_entry(founds->pointers_arr_of_ft_hash_elem[i], struct frame_table_entry, elem);
+          fte->setting_now = false;
+        }
+        vm_ft_same_keys_free(founds);
+
+sema_up(&frame_table_w);
+      }
+  }
+}
+void unmake(void* user_pointer_inclusive, size_t bytes){
+  struct thread* t = thread_current();
+
+  void* new_page = NULL;
+  for(size_t i = 0; i < bytes; ++i){
+      //페이지가 달라진 경우
+      if(new_page != pg_round_down(user_pointer_inclusive + i)){
+        //advanced
+        new_page = pg_round_down(user_pointer_inclusive + i);
+
+        //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
+        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
+
+        //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
+        struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
+        vm_frame_set_for_user_pointer(founds, false);
+        vm_ft_same_keys_free(founds);
+      }
+  }
+}
+
+
+
+
 
 /* hash function들 */
 static unsigned frame_table_hash_func(const struct vm_ft_hash_elem *e, void* aux UNUSED)

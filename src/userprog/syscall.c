@@ -18,8 +18,6 @@
 static void syscall_handler (struct intr_frame *);
 
 static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t bytes);
-static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes);
-static void unmake(void* user_pointer_inclusive, size_t bytes);
 
 void exit (int status){
   printf("%s: exit(%d)\n", thread_name(), status);
@@ -612,69 +610,4 @@ static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t 
 #endif
   }
   return true;
-}
-
-/* 4.3.5) user_pointer_inclusive부터 bytes만큼 physical memory에 고정시킨다.
-   BLOCK_FILESYS, BLOCK_SWAP 와 같은 block device를 컨트롤하는 block device driver가 있다.
-   BLOCK_FILESYS에서 block_read(), block_write()를 호출하는 도중에 page_fault()가 발생하여
-   BLOCK_SWAP에서 block_read(), block_write()를 호출하는 상황이 발생하면 안된다.
-   
-   user_pointer_inclusive 부터 bytes까지 swap device에 존재하는 페이지는 physical memory로 데려온다. */
-static void make_user_pointer_in_physical_memory(void* user_pointer_inclusive, size_t bytes){
-  struct thread* t = thread_current();
-  
-  void* new_page = NULL;
-  for(size_t i = 0; i < bytes; ++i){
-      //페이지가 달라진 경우
-      if(new_page != pg_round_down(user_pointer_inclusive + i)){
-        //advanced
-        new_page = pg_round_down(user_pointer_inclusive + i);
-
-        //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
-        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
-        bool newly_allocated = false;
-        if(spte->frame_data_clue == IN_SWAP){
-          vm_load_IN_SWAP_to_user_pool (spte);
-          newly_allocated = true;
-        }
-        if(spte->frame_data_clue == IN_FILE){
-          vm_load_IN_FILE_to_user_pool(spte);
-          newly_allocated = true;
-        }
-
-/*
- * critical section 여전히 존재...
- * 이 타이밍에 IN_SWAP이 되지 않을 것이라 장담할 수가 없음.
- * frame number로 배열을 만들어서 lock을 잡아 해결 가능할 듯 하다(TODO LATER,,,시간없어서 못할듯).
- */
-
-        //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
-        struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
-        vm_frame_set_for_user_pointer(founds, true);
-        vm_ft_same_keys_free(founds);
-
-        if(newly_allocated)
-          vm_frame_setting_over(vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool));
-      }
-  }
-}
-static void unmake(void* user_pointer_inclusive, size_t bytes){
-  struct thread* t = thread_current();
-
-  void* new_page = NULL;
-  for(size_t i = 0; i < bytes; ++i){
-      //페이지가 달라진 경우
-      if(new_page != pg_round_down(user_pointer_inclusive + i)){
-        //advanced
-        new_page = pg_round_down(user_pointer_inclusive + i);
-
-        //이번 user_pointer_inclusive + i가 속하는 페이지의 spte를 구한다.
-        struct supplemental_page_table_entry* spte = vm_spt_lookup(&t->spt, new_page);
-
-        //이번 user_pointer_inclusive +i가 나타내는 frame을 구하고 user pointer를 위해 쓰인다고 기록한다.
-        struct vm_ft_same_keys* founds = vm_frame_lookup_same_keys(spte->kernel_virtual_page_in_user_pool); 
-        vm_frame_set_for_user_pointer(founds, false);
-        vm_ft_same_keys_free(founds);
-      }
-  }
 }
