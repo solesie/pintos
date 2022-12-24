@@ -23,12 +23,118 @@ struct dir_entry
     bool in_use;                        /* In use or free? */
   };
 
+
+
+
+/* path를 통해 directory와 filename을 초기화한다. */
+void split_path(const char *path, char *directory, char *filename){
+  int l = strlen(path);
+  char *s = (char*) malloc( sizeof(char) * (l + 1) );
+  memcpy (s, path, sizeof(char) * (l + 1));
+
+  // absolute path handling
+  char *dir = directory;
+  if(l > 0 && path[0] == '/') {
+    if(dir) *dir++ = '/';
+  }
+
+  // tokenize
+  char *token, *p, *last_token = "";
+  for (token = strtok_r(s, "/", &p); token != NULL;
+       token = strtok_r(NULL, "/", &p))
+  {
+    int tl = strlen (last_token);
+    if (dir && tl > 0) {
+      memcpy (dir, last_token, sizeof(char) * tl);
+      dir[tl] = '/';
+      dir += tl + 1;
+    }
+
+    last_token = token;
+  }
+
+  if(dir) *dir = '\0';
+  memcpy (filename, last_token, sizeof(char) * (strlen(last_token) + 1));
+  free (s);
+}
+
+
+/* Opens the directory for given path. */
+struct dir * dir_open_path (const char *path){
+  // copy of path, to tokenize
+  int l = strlen(path);
+  char s[l + 1];
+  strlcpy(s, path, l + 1);
+
+  // relative path
+  struct dir *curr;
+  if(path[0] == '/') { // absolute path
+    curr = dir_open_root();
+  }
+  else { // relative path
+    struct thread *t = thread_current();
+    if (t->cwd == NULL) // idle
+      curr = dir_open_root();
+    else {
+      curr = dir_reopen( t->cwd );
+    }
+  }
+
+  char *token, *p;
+  for (token = strtok_r(s, "/", &p); token != NULL;
+       token = strtok_r(NULL, "/", &p))
+  {
+    struct inode *inode = NULL;
+    if(! dir_lookup(curr, token, &inode)) {
+      dir_close(curr);
+      return NULL; // such directory not exist
+    }
+
+    struct dir *next = dir_open(inode);
+    if(next == NULL) {
+      dir_close(curr);
+      return NULL;
+    }
+    dir_close(curr);
+    curr = next;
+  }
+
+  // prevent from opening removed directories
+  if (curr->inode->removed) {
+    dir_close(curr);
+    return NULL;
+  }
+
+  return curr;
+}
+
+
+
+
+
+
+
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool
 dir_create (block_sector_t sector, size_t entry_cnt)
 {
-  return inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1);
+  bool success = true;
+  success = inode_create (sector, entry_cnt * sizeof (struct dir_entry), 1);
+  if(!success) return false;
+
+  // The first (offset 0) dir entry is for parent directory; do self-referencing
+  // Actual parent directory will be set on execution of dir_add()
+  struct dir *dir = dir_open( inode_open(sector) );
+  ASSERT (dir != NULL);
+  struct dir_entry e;
+  e.inode_sector = sector;
+  if (inode_write_at(dir->inode, &e, sizeof e, 0) != sizeof e) {
+    success = false;
+  }
+  dir_close (dir);
+
+  return success;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -40,7 +146,7 @@ dir_open (struct inode *inode)
   if (inode != NULL && dir != NULL)
     {
       dir->inode = inode;
-      dir->pos = 0;
+      dir->pos = sizeof (struct dir_entry); // 0-pos is for parent directory
       return dir;
     }
   else
@@ -104,7 +210,7 @@ lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+  for (ofs = sizeof e; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e) 
   {
     if (e.in_use && !strcmp (name, e.name)) 
@@ -141,7 +247,16 @@ dir_lookup (const struct dir *dir, const char *name,
   lock_release(&(dir->inode->inode_readcnt_mutex));
 #endif
 
-  if (lookup (dir, name, &e, NULL))
+  if (strcmp (name, ".") == 0) {
+    // current directory
+    *inode = inode_reopen (dir->inode);
+  }
+  else if (strcmp (name, "..") == 0) {
+    // 부모 정보는 0번 dir entry에 존재한다.
+    inode_read_at (dir->inode, &e, sizeof e, 0);
+    *inode = inode_open (e.inode_sector);
+  }
+  else if(lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);
   else
     *inode = NULL;
@@ -165,7 +280,7 @@ dir_lookup (const struct dir *dir, const char *name,
    error occurs.
    dir->inode 에 writing하는 상황이다. */
 bool
-dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
+dir_add (struct dir *dir, const char *name, block_sector_t inode_sector, int is_dir)
 {
   struct dir_entry e;
   off_t ofs;
@@ -180,23 +295,34 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   }
 
 #ifdef USERPROG
-  lock_acquire(&(dir->inode->inode_readcnt_mutex));
-  ++dir->inode->read_cnt;
-  if(dir->inode->read_cnt == 1)
-    sema_down(&(dir->inode->w));
-  lock_release(&(dir->inode->inode_readcnt_mutex));
+  sema_down(&(dir->inode->w));
 #endif
 
   /* Check that NAME is not in use. */
   if (lookup (dir, name, NULL, NULL)){
-#ifdef USERPROG
-    lock_acquire(&(dir->inode->inode_readcnt_mutex));
-    --dir->inode->read_cnt;
-    if(dir->inode->read_cnt == 0)
-      sema_up(&(dir->inode->w));
-    lock_release(&(dir->inode->inode_readcnt_mutex));
-#endif
     goto done;
+  }
+
+  /* directory일 경우에 child directory inode는 [inode_sector]에 존재한다.
+     child directory inode의 0번째 dir entry에 부모 디렉토리를 이 디렉토리로 갱신한다. */
+  if (is_dir){
+    /* e is a parent-directory-entry here */
+    struct dir *child_dir = dir_open( inode_open(inode_sector) );
+    if(child_dir == NULL) {
+      goto done;
+    }
+
+    e.inode_sector = dir->inode->sector;
+    
+    /* child directory inode에 write 하는 상황이다. */
+    sema_down(&child_dir->inode->w);
+    if (inode_write_at(child_dir->inode, &e, sizeof e, 0) != sizeof e) {
+      sema_up(&child_dir->inode->w);
+      dir_close (child_dir);
+      goto done;
+    }
+    sema_up(&child_dir->inode->w);
+    dir_close (child_dir);
   }
 
   /* Set OFS to offset of free slot.
@@ -211,18 +337,6 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
     if (!e.in_use)
       break;
 
-#ifdef USERPROG
-  lock_acquire(&(dir->inode->inode_readcnt_mutex));
-  --dir->inode->read_cnt;
-  if(dir->inode->read_cnt == 0)
-    sema_up(&(dir->inode->w));
-  lock_release(&(dir->inode->inode_readcnt_mutex));
-#endif
-
-#ifdef USERPROG
-  sema_down(&(dir->inode->w));
-#endif
-
   /* Write slot. */
   e.in_use = true;
   strlcpy (e.name, name, sizeof e.name);
@@ -235,6 +349,22 @@ dir_add (struct dir *dir, const char *name, block_sector_t inode_sector)
   sema_up(&(dir->inode->w));
 #endif
   return success;
+}
+
+static bool
+dir_is_empty (struct dir *dir)
+{
+  struct dir_entry e;
+  off_t ofs;
+
+  for (ofs = sizeof e; /* 0-pos is for parent directory */
+       inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
+       ofs += sizeof e)
+  {
+    if (e.in_use)
+      return false;
+  }
+  return true;
 }
 
 /* Removes any entry for NAME in DIR.
@@ -264,6 +394,15 @@ dir_remove (struct dir *dir, const char *name)
   inode = inode_open (e.inode_sector);
   if (inode == NULL)
     goto done;
+
+  /* Prevent removing non-empty directory. */
+  if (inode->data.is_dir == 1) {
+    // target : the directory to be removed. (dir : the base directory)
+    struct dir *target = dir_open (inode);
+    bool is_empty = dir_is_empty(target);
+    free(target);
+    if (!is_empty) goto done;
+  }
 
   /* Erase directory entry. */
   e.in_use = false;

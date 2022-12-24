@@ -544,10 +544,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
 
 /* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
    Returns the number of bytes actually written, which may be
-   less than SIZE if end of file is reached or an error occurs.
-   (Normally a write at end of file would extend the inode, but
-   growth is not yet implemented.)
-   파일 크기가 늘어나는 것은 아직 고려되지 않는다.(prj2) */
+   less than SIZE if end of file is reached or an error occurs. */
 off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
                 off_t offset) 
@@ -564,7 +561,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
     // extend and reserve up to [offset + size] bytes
     bool success;
     success = inode_set_file_length (& inode->data, offset + size);
-    if (!success) return 0;  // fail?
+    if (!success) return 0;
 
     // write back the (extended) file size
     inode->data.length = offset + size;

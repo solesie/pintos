@@ -6,6 +6,7 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "threads/thread.h"
 
 #include "threads/synch.h"
 #include "filesys/cache.h"
@@ -49,18 +50,21 @@ filesys_done (void)
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size, int is_dir) 
+filesys_create (const char *path, off_t initial_size, int is_dir) 
 {
   block_sector_t inode_sector = 0;
   bool inode_freed = false;
-#ifdef USERPROG
-  block_sector_t data_sector = 1;
-#endif
-  struct dir *dir = dir_open_root (); //아직까지 루트 디렉토리에만 생성이 가능하다.
+
+  char directory[ strlen(path) ];
+  char file_name[ strlen(path) ];
+  split_path(path, directory, file_name);
+  struct dir *dir = dir_open_path (directory);
+
+
   bool success = (dir != NULL
                   && free_map_allocate (1, &inode_sector) //빈 섹터를 찾고
                   && inode_create (inode_sector, initial_size, is_dir) //섹터에 file의 inode를 만들고, 파일을 섹터에 할당하고
-                  && dir_add (dir, name, inode_sector)); //name이 이미 존재하는지 확인한다. 없으면 기록한다.
+                  && dir_add (dir, file_name, inode_sector, is_dir));
   if (!success){
     if(inode_sector != 0) //free_map_allocate(1, ) 에서 할당된 부분을 해제한다.
       free_map_release (inode_sector, 1);
@@ -85,14 +89,30 @@ filesys_create (const char *name, off_t initial_size, int is_dir)
 struct file *
 filesys_open (const char *name)
 {
-  struct dir *dir = dir_open_root ();
-  struct inode *inode = NULL;
-  bool success = false;
+  int name_len = strlen(name);
+  if (name_len == 0) return NULL;
 
-  if (dir != NULL) {
-    success = dir_lookup (dir, name, &inode); //이미 열려 있다면 inode_reopen을 호출한다.
+  char directory[ name_len + 1 ];
+  char file_name[ name_len + 1 ];
+  split_path(name, directory, file_name);
+  struct dir *dir = dir_open_path (directory);
+  struct inode *inode = NULL;
+
+  // removed directory handling
+  if (dir == NULL) return NULL;
+
+  if (strlen(file_name) > 0) {
+    dir_lookup (dir, file_name, &inode);
+    dir_close (dir);
   }
-  dir_close (dir);
+  else { // empty filename
+    inode = dir_get_inode (dir);
+  }
+
+  // removed file handling
+  if (inode == NULL || inode->removed)
+    return NULL;
+
   return file_open (inode);
 }
 
@@ -100,16 +120,31 @@ filesys_open (const char *name)
    Returns true if successful, false on failure.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-bool
-filesys_remove (const char *name) 
-{
-  struct dir *dir = dir_open_root ();
-  bool success = dir != NULL && dir_remove (dir, name);
-  dir_close (dir); 
+bool filesys_remove (const char *name) {
+  char directory[ strlen(name) ];
+  char file_name[ strlen(name) ];
+  split_path(name, directory, file_name);
+  struct dir *dir = dir_open_path (directory);
+
+  bool success = (dir != NULL && dir_remove (dir, file_name));
+  dir_close (dir);
 
   return success;
 }
-
+
+bool filesys_chdir (const char *name){
+  struct dir *dir = dir_open_path (name);
+
+  if(dir == NULL) {
+    return false;
+  }
+
+  // switch CWD
+  dir_close (thread_current()->cwd);
+  thread_current()->cwd = dir;
+  return true;
+}
+
 /* Formats the file system.
    bitmap의 inode 생성 후 파일(디스크)에 기록
    root directory의 inode 생성.  */

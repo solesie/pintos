@@ -2,6 +2,8 @@
 #define USERPROG_SYSCALL_H
 #include "lib/user/syscall.h"
 
+/* system call 은 그냥 정리용으로 적어둔 것임. */
+
 void syscall_init (void);
 
 /* terminate Pintos by calling shutdown_power_off()(declared in devices/shutdown.h)
@@ -68,6 +70,12 @@ int max_of_four_int(int a, int b, int c, int d);
 typedef int mmpid_t;
 mmpid_t mmap(int fd, void* user_page);
 void munmap(mmpid_t mapping);
+
+bool sys_chdir(const char *dir);
+bool sys_mkdir(const char *dir);
+bool readdir (int fd, char *name);
+bool isdir (int fd);
+int inumber (int fd);
 
 
 #endif /* userprog/syscall.h */

@@ -14,6 +14,7 @@
 #include "userprog/pagedir.h"
 #include "vm/frame.h"
 #include "filesys/cache.h"
+#include "filesys/directory.h"
 
 static void syscall_handler (struct intr_frame *);
 
@@ -21,17 +22,19 @@ static bool is_valid_user_provided_pointer(void* user_pointer_inclusive, size_t 
 
 void exit (int status){
   printf("%s: exit(%d)\n", thread_name(), status);
-  thread_current() -> exit_status = status;
+  struct thread* t = thread_current();
+  t -> exit_status = status;
   for (int i = 3; i < 128; ++i) {
-    if (thread_current()->fd[i] != NULL) {
+    if (t->fd[i] != NULL) {
       close(i);
     }
   }
   for(int i = 0; i <128; ++i){
-    if (thread_current()->mmap_d[i] != NULL) {
+    if (t->mmap_d[i] != NULL) {
       munmap(i);
     }
   }
+  if(t->cwd) dir_close(t->cwd);
   thread_exit ();
 }
 
@@ -65,7 +68,14 @@ int open(const char* file){
       if(strcmp(cur_process->name, file) == 0){
         file_deny_write(f);
       }
-      cur_process->fd[i] = f;
+      cur_process->fd[i] = malloc(sizeof(struct file_descriptor));
+      cur_process->fd[i]->file = f;
+      // directory
+      if(f->inode != NULL && f->inode->data.is_dir == 1)
+        cur_process->fd[i]->dir = dir_open( inode_reopen(f->inode) );
+      else 
+        cur_process->fd[i]->dir = NULL;
+
       return i;
     }
   }
@@ -74,11 +84,17 @@ int open(const char* file){
 
 void close(int fd){
   struct thread* cur_process = thread_current();
-  if(fd < 0 || fd >= 128 || cur_process->fd[fd]==NULL)
+  if(fd < 0 || fd >= 128 || cur_process->fd[fd] == NULL)
 		exit(-1);
   
-	file_close(cur_process->fd[fd]);
-	cur_process->fd[fd]=NULL;
+  if(cur_process->fd[fd]->dir != NULL) {
+    ASSERT(cur_process->fd[fd]->file->inode->data.is_dir == 1);
+    dir_close(cur_process->fd[fd]->dir);
+  }
+  file_close(cur_process->fd[fd]->file);
+  
+  free(cur_process->fd[fd]);
+	cur_process->fd[fd] = NULL;
 }
 
 int read(int fd, void* buffer, unsigned size){
@@ -89,9 +105,13 @@ int read(int fd, void* buffer, unsigned size){
   } 
   else if(fd >= 3 && fd < 128){
     struct thread* cur_process = thread_current ();
-    struct file* f = cur_process->fd[fd];
-    if(f == NULL) //이 프로세스에서는 f가 open 된 적이 없다.
+    if(cur_process->fd[fd]==NULL)//이 프로세스에서는 f가 open 된 적이 없다.
       exit(-1);
+
+    if(cur_process->fd[fd]->dir != NULL)
+      return -1;
+    
+    struct file* f = cur_process->fd[fd]->file;
     //preload_and_pin_pages(buffer,size);
     i = file_read (f, buffer, size);
     //unpin_preloaded_pages(buffer,size);
@@ -114,10 +134,13 @@ int write (int fd, const void* buffer, unsigned size){
       exit(-1);
     }
 
-    ret = file_write(cur_process->fd[fd], buffer, size);
+    if(cur_process->fd[fd]->dir != NULL)
+      return ret;
+
+    ret = file_write(cur_process->fd[fd]->file, buffer, size);
 
   } else{
-    return 0;
+    return ret;
   }
   return ret;
 }
@@ -141,20 +164,33 @@ void seek(int fd, unsigned position){
   struct thread* cur_process = thread_current();
 	if(cur_process->fd[fd]==NULL)
 		exit(-1);
-	file_seek(cur_process->fd[fd], position);
+  
+  if(cur_process->fd[fd]->dir != NULL)
+    exit(-1);
+
+	file_seek(cur_process->fd[fd]->file, position);
 }
 
 unsigned tell(int fd){
   struct thread* cur_process = thread_current();
 	if(cur_process->fd[fd]==NULL)
 		exit(-1);
-	return file_tell(cur_process->fd[fd]);
+
+  if(cur_process->fd[fd]->dir != NULL)
+    exit(-1);
+  
+	return file_tell(cur_process->fd[fd]->file);
 }
 
 int filesize(int fd){
-	if(thread_current()->fd[fd]==NULL)
+  struct thread* t = thread_current();
+	if(t->fd[fd]==NULL)
 		exit(-1);
-	return file_length(thread_current()->fd[fd]);
+  
+  if(t->fd[fd]->dir != NULL)
+    exit(-1);
+
+	return file_length(t->fd[fd]->file);
 }
 
 int fibonacci(int n){
@@ -195,9 +231,13 @@ mmpid_t mmap(int fd, void* user_page){
   if(pg_ofs(user_page) != 0) return -1;
 
   struct thread* cur = thread_current();
-  struct file* f = cur->fd[fd];
+  if(cur->fd[fd] == NULL) return -1;
+  if(cur->fd[fd]->dir != NULL) return -1;
+
+  struct file* f = cur->fd[fd]->file;
   off_t file_bytes;
   if(f == NULL) return -1;
+
   //fd를 열었을 때 파일 길이가 0이면 실패한다.
   file_bytes = file_length(f);
   if(file_bytes == 0) return -1;
@@ -262,6 +302,50 @@ void munmap(mmpid_t mapping){
 }
 
 
+
+bool chdir(const char *filename)
+{
+  return filesys_chdir(filename);// not synch yet
+}
+
+bool mkdir(const char *filename)
+{
+  return filesys_create(filename, 0, 1);
+}
+
+bool readdir(int fd, char *name)
+{
+  struct thread* t = thread_current();
+
+  if(t->fd[fd] == NULL) return false;
+  struct file* f = t->fd[fd]->file;
+  if(f == NULL) return false;
+
+  if(f->inode->data.is_dir == 0) {
+    ASSERT(t->fd[fd]->dir == NULL);
+    return false;
+  }
+
+  // ASSERT (file_d->dir != NULL); // see sys_open()
+  return dir_readdir (t->fd[fd]->dir, name);
+}
+
+bool isdir(int fd)
+{
+  struct thread* t = thread_current();
+  if(t->fd[fd] == NULL) return false;
+
+  ASSERT((t->fd[fd]->dir != NULL) == (t->fd[fd]->file->inode->data.is_dir == 1));
+
+  return t->fd[fd]->dir != NULL;
+}
+
+int inumber(int fd)
+{
+  struct thread* t = thread_current();
+  if(t->fd[fd] == NULL) return false;
+  return (int)inode_get_inumber (t->fd[fd]->file->inode);
+}
 
 
 
@@ -580,6 +664,113 @@ syscall_handler (struct intr_frame *f UNUSED)
       make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
 
       munmap(*(int*)(f->esp + 4));
+
+      unmake(f->esp + 4, sizeof(int));
+      break;
+    }
+
+    case SYS_CHDIR: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(uint32_t*));
+
+      const char* start = (const char*)*(uint32_t *)(f->esp + 4);
+      int i;
+      for(i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+          
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
+          break;
+        }
+      }
+
+      f->eax = chdir((const char*)*(uint32_t *)(f->esp + 4));
+
+      unmake(f->esp + 4, sizeof(uint32_t*));
+      unmake(start, i);
+
+      break;
+    }
+
+    case SYS_MKDIR: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(uint32_t*)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(uint32_t*));
+
+      const char* start = (const char*)*(uint32_t *)(f->esp + 4);
+      int i;
+      for(i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+          
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
+          break;
+        }
+      }
+
+      f->eax = mkdir((const char*)*(uint32_t *)(f->esp + 4));
+
+      unmake(f->esp + 4, sizeof(uint32_t*));
+      unmake(start, i);
+
+      break;
+    }
+
+    case SYS_READDIR: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)) 
+       || !is_valid_user_provided_pointer(f->esp + 8, sizeof(uint32_t)))
+        exit(-1);
+
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+      make_user_pointer_in_physical_memory(f->esp + 8, sizeof(uint32_t));
+      
+      char* start = (char*)*(uint32_t *)(f->esp + 8);
+      int i;
+      for(i = 0; ; ++i){
+        if(!is_valid_user_provided_pointer(start+i, 1))
+          exit(-1);
+        
+        if(i % PGSIZE == 0)
+          make_user_pointer_in_physical_memory(start + i, 1);
+        if(start[i] == NULL){
+          make_user_pointer_in_physical_memory(start + i, 1);
+          break;
+        }
+      }
+
+      f->eax = readdir(*(int *)(f->esp + 4),(char *)*(uint32_t *)(f->esp + 8));
+
+      unmake(f->esp + 4, sizeof(int));
+      unmake(f->esp + 8, sizeof(uint32_t));
+      unmake(start, i);
+      
+      break;
+    }
+
+    case SYS_ISDIR: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+
+      f->eax = isdir(*(int*)(f->esp + 4));
+
+      unmake(f->esp + 4, sizeof(int));
+      break;
+    }
+
+    case SYS_INUMBER: {
+      if(!is_valid_user_provided_pointer(f->esp + 4, sizeof(int)))
+        exit(-1);
+      make_user_pointer_in_physical_memory(f->esp + 4, sizeof(int));
+
+      f->eax = inumber(*(int*)(f->esp + 4));
 
       unmake(f->esp + 4, sizeof(int));
       break;
