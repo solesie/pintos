@@ -92,12 +92,20 @@ start_process (void *file_name_)
 
   struct thread* cur = thread_current ();
   cur->load_success = success;
+
+  // child inherits parent CWD
+  if (cur->parent_thread != NULL && cur->parent_thread->cwd != NULL)
+    cur->cwd = dir_reopen(cur->parent_thread->cwd);
+  else 
+    cur->cwd = dir_open_root();
+
+
   sema_up (&cur->wait_sema); // 현재 프로세스를 wait 할 수 있게 한다.
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
+    exit(-1);
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
      threads/intr-stubs.S).  Because intr_exit takes all of its
@@ -186,6 +194,7 @@ process_exit (void)
   while (!list_empty(&cur->child)) {
     struct list_elem *e = list_pop_front (&cur->child);
     struct thread *c = list_entry (e, struct thread, child_elem);
+    c->parent_thread = NULL;
     sema_up (&c->exit_sema);
   }
   

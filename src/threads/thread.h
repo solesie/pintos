@@ -41,6 +41,12 @@ struct mmap_descriptor{
    void* starting_page;
 };
 
+struct file_descriptor{
+   struct file* file;
+   /* If FILE is directory, DIR variable is valid(proj5). */
+   struct dir* dir;
+};
+
 
 /* A kernel thread or user process. PCB
 
@@ -127,14 +133,16 @@ struct thread
     struct semaphore exit_sema;
 
     bool load_success;
-
-    struct file* fd[128];
 #endif
+
+    struct file_descriptor* fd[128];
 
 #ifdef VM
     struct hash spt;
     struct mmap_descriptor* mmap_d[128];
 #endif
+    struct dir *cwd;
+    struct thread* parent_thread;
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
