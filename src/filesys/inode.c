@@ -541,9 +541,7 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   return bytes_read;
 }
 
-/* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET.
-   Returns the number of bytes actually written, which may be
-   less than SIZE if end of file is reached or an error occurs. */
+/* Writes SIZE bytes from BUFFER into INODE, starting at OFFSET. */
 off_t
 inode_write_at (struct inode *inode, const void *buffer_, off_t size,
                 off_t offset) 
