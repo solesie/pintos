@@ -134,12 +134,10 @@ bool filesys_remove (const char *name) {
 
 bool filesys_chdir (const char *name){
   struct dir *dir = dir_open_path (name);
-
-  if(dir == NULL) {
+  if(dir == NULL)
     return false;
-  }
 
-  // switch CWD
+  // switch
   dir_close (thread_current()->cwd);
   thread_current()->cwd = dir;
   return true;

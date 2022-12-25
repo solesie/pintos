@@ -29,8 +29,8 @@ struct dir_entry
 /* path를 통해 directory와 filename을 초기화한다. */
 void split_path(const char *path, char *directory, char *filename){
   int l = strlen(path);
-  char *s = (char*) malloc( sizeof(char) * (l + 1) );
-  memcpy (s, path, sizeof(char) * (l + 1));
+  char *full_dir = (char*) malloc( sizeof(char) * (l + 1) );
+  memcpy (full_dir, path, sizeof(char) * (l + 1));
 
   // absolute path handling
   char *dir = directory;
@@ -39,10 +39,8 @@ void split_path(const char *path, char *directory, char *filename){
   }
 
   // tokenize
-  char *token, *p, *last_token = "";
-  for (token = strtok_r(s, "/", &p); token != NULL;
-       token = strtok_r(NULL, "/", &p))
-  {
+  char *token, *save_ptr, *last_token = "";
+  for (token = strtok_r(full_dir, "/", &save_ptr); token != NULL; token = strtok_r(NULL, "/", &save_ptr)){
     int tl = strlen (last_token);
     if (dir && tl > 0) {
       memcpy (dir, last_token, sizeof(char) * tl);
@@ -55,7 +53,7 @@ void split_path(const char *path, char *directory, char *filename){
 
   if(dir) *dir = '\0';
   memcpy (filename, last_token, sizeof(char) * (strlen(last_token) + 1));
-  free (s);
+  free (full_dir);
 }
 
 
@@ -63,49 +61,47 @@ void split_path(const char *path, char *directory, char *filename){
 struct dir * dir_open_path (const char *path){
   // copy of path, to tokenize
   int l = strlen(path);
-  char s[l + 1];
-  strlcpy(s, path, l + 1);
+  char path_temp[l + 1];
+  strlcpy(path_temp, path, l + 1);
 
   // relative path
-  struct dir *curr;
+  struct dir *cur_dir;
   if(path[0] == '/') { // absolute path
-    curr = dir_open_root();
+    cur_dir = dir_open_root();
   }
   else { // relative path
     struct thread *t = thread_current();
     if (t->cwd == NULL) // idle
-      curr = dir_open_root();
+      cur_dir = dir_open_root();
     else {
-      curr = dir_reopen( t->cwd );
+      cur_dir = dir_reopen( t->cwd );
     }
   }
 
-  char *token, *p;
-  for (token = strtok_r(s, "/", &p); token != NULL;
-       token = strtok_r(NULL, "/", &p))
-  {
-    struct inode *inode = NULL;
-    if(! dir_lookup(curr, token, &inode)) {
-      dir_close(curr);
+  char *token, *save_pointer;
+  for (token = strtok_r(path_temp, "/", &save_pointer); token != NULL; token = strtok_r(NULL, "/", &save_pointer)){
+    struct inode* dir_inode = NULL;
+    if(! dir_lookup(cur_dir, token, &dir_inode)) {
+      dir_close(cur_dir);
       return NULL; // such directory not exist
     }
 
-    struct dir *next = dir_open(inode);
+    struct dir *next = dir_open(dir_inode);
     if(next == NULL) {
-      dir_close(curr);
+      dir_close(cur_dir);
       return NULL;
     }
-    dir_close(curr);
-    curr = next;
+    dir_close(cur_dir);
+    cur_dir = next;
   }
 
-  // prevent from opening removed directories
-  if (curr->inode->removed) {
-    dir_close(curr);
+  // prevent opening removed directories
+  if (cur_dir->inode->removed) {
+    dir_close(cur_dir);
     return NULL;
   }
 
-  return curr;
+  return cur_dir;
 }
 
 

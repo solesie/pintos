@@ -214,12 +214,8 @@ static bool inode_set_file_length(struct inode_disk* idisk, off_t new_bytes){
 }
 
 
-static void
-inode_deallocate_indirect (block_sector_t entry, size_t num_sectors, int level)
-{
-  // only supports 2-level indirect block scheme as of now
-  ASSERT (level <= 2);
-
+static void inode_deallocate_indirect (block_sector_t entry, size_t num_sectors, int level){
+  //base case
   if (level == 0) {
     free_map_release (entry, 1);
     return;
@@ -228,10 +224,15 @@ inode_deallocate_indirect (block_sector_t entry, size_t num_sectors, int level)
   block_sector_t indirect_block[NUM_POINTER_BLOCKS];
   buffer_cache_read(entry, indirect_block, 0, BLOCK_SECTOR_SIZE);
 
-  size_t unit = (level == 1 ? 1 : NUM_POINTER_BLOCKS);
-  size_t i, l = DIV_ROUND_UP (num_sectors, unit);
+  size_t unit;
+  if(level == 1)
+    unit = 1;
+  else
+    unit = NUM_POINTER_BLOCKS;
+  
+  size_t offset = DIV_ROUND_UP (num_sectors, unit);
 
-  for (i = 0; i < l; ++ i) {
+  for (int i = 0; i < offset; ++i) {
     size_t subsize = min(num_sectors, unit);
     inode_deallocate_indirect (indirect_block[i], subsize, level - 1);
     num_sectors -= subsize;
@@ -242,9 +243,7 @@ inode_deallocate_indirect (block_sector_t entry, size_t num_sectors, int level)
 }
 
 
-static
-bool inode_deallocate (struct inode *inode)
-{
+static bool inode_deallocate (struct inode *inode){
   off_t file_length = inode->data.length; // bytes
   if(file_length < 0) return false;
 
@@ -556,14 +555,14 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   const uint8_t *buffer = buffer_;
   off_t bytes_written = 0;
 
-  // beyond the EOF: extend the file
+  // end of file에 도달하였다.
   if( byte_to_sector(inode, offset + size - 1) == -1u ) {
-    // extend and reserve up to [offset + size] bytes
+    // offset + size bytes 로 파일의 크기를 설정한다.
     bool success;
     success = inode_set_file_length (& inode->data, offset + size);
     if (!success) return 0;
 
-    // write back the (extended) file size
+    // inode_disk에서 설정한 내용들을 실제 on-disk에 반영한다.
     inode->data.length = offset + size;
     buffer_cache_write (inode->sector, & inode->data, 0, BLOCK_SECTOR_SIZE);
   }
